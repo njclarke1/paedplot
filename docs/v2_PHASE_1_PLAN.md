@@ -82,47 +82,65 @@ Returns nothing. Draws into the canvas. `range` will be `'2-9'` for Phase 1; the
 - Canvas height: derive the same way Separate does — `pxPerSquare × ySquaresInView`. Use `GRID['2-9']` for x-axis squares (`xYears: 0.5`). For y-squares total, target a panel that's roughly the sum of the current Separate height + weight panel heights ÷ 2 (i.e., one canvas the size of one of the existing panels, since both data series now share it). Tune visually.
 - Margins: top 20, bottom 42, left 50 (height labels), right 50 (weight labels). The right margin must be wider than current `CHART_MARGINS.right = 52` only if labels need it; aim to keep visual width similar.
 - X-axis: identical spec to Separate 2–9y (`getGridSpec('2-9')`). 0.5y minors, 1y majors, integer year labels.
-- **Two y-axes:**
-  - **Left (height, cm):** ticks/labels every `Y_GRID_SPEC['2-9'].height.major` (5 cm). Minor gridlines every `Y_GRID_SPEC['2-9'].height.minor` (1 cm) — but only if `pxPerSquare ≥ 14`, else minors are pip-only on the axis strip.
-  - **Right (weight, kg):** ticks/labels every `Y_GRID_SPEC['2-9'].weight.major` (5 kg with current setting, 2 kg if you want to keep the v1.5.1 readability bias — flag this to Nick before deciding). Right-aligned labels.
-- **Plot-area gridlines: HEIGHT axis only.** (Single set of horizontal gridlines for clarity. Weight ticks live as labels and a short tick mark on the right axis strip but DO NOT draw across the plot.) Mark this as a Phase-1 design decision — Nick will eyeball and may ask for both sets.
+- **Two y-axes, SHARED gridline pixel positions:**
+  - **Left (height, cm):** ticks/labels every `Y_GRID_SPEC['2-9'].height.major` (5 cm). Minor pips every `Y_GRID_SPEC['2-9'].height.minor` (1 cm).
+  - **Right (weight, kg):** ticks/labels every `Y_GRID_SPEC['2-9'].weight.major` (5 kg — confirmed by Nick). Minor pips every 1 kg. Right-aligned labels.
+  - Both axes share `pxPerSquare` so every horizontal gridline is simultaneously a height-major AND a weight-major. Minor positions also coincide (1 cm / 1 kg = 1/5 of a square on both axes).
+- **Plot-area gridlines: ONE shared set, drawn every `pxPerSquare`** (major) and every `pxPerSquare/5` (minor). Each line is meaningful on both axes.
+- **Weight axis is NOT floored at 0** for the alignment algorithm (see below) — but weight labels are NOT drawn for axis values < 0. The bottom of the weight axis strip stays unlabelled below zero.
 - Background: same cream `#FFFDF0` as paper-chart current.
-- Sex-accent tint (`#68A1C5` boys, `#C16B86` girls) reduces to ~3% alpha as a faint full-canvas background tint, replacing its previous role on centile lines.
+- **Sex-accent tint:** apply at two sites — (a) faint full-canvas background tint (`#68A1C5` boys / `#C16B86` girls at ~3% alpha overlaying the cream), and (b) UI chrome (toolbar/range button accent, results-panel border). Centile lines themselves are now measurement-coloured (see below), not sex-coloured.
 
-**Y-axis alignment algorithm:**
+**Y-axis alignment algorithm (shared-gridline version):**
 ```
 Given range '2-9':
   ageMin = 2.0, ageMax = 9.0
   midAge = (ageMin + ageMax) / 2 = 5.5
+  htMajor = Y_GRID_SPEC['2-9'].height.major  // 5 cm
+  wtMajor = Y_GRID_SPEC['2-9'].weight.major  // 5 kg
 
 For each measurement type m in {'height','weight'}:
-  centileData_m = centile cache for m (from generateCentileLines)
-  Find LMS at midAge using lookupLMS(m, sex, midAge)
-  midVal_m = M (the M parameter at midAge)
+  midVal_m = M parameter at midAge from lookupLMS(m, sex, midAge)
+  vMin_m   = min over centileData_m[0.4th] across [ageMin, ageMax]
+  vMax_m   = max over centileData_m[99.6th] across [ageMin, ageMax]
+  raw_half_m = max(vMax_m - midVal_m, midVal_m - vMin_m)
+  half_squares_m = ceil(raw_half_m / Y_GRID_SPEC['2-9'][m].major)
 
-  Compute data envelope across the visible age range:
-    vMin_m = min over centileData[0.4th] across ages
-    vMax_m = max over centileData[99.6th] across ages
-    Optionally pad by 0.5 × Y_GRID_SPEC.major
+# Shared half-squares: take the larger requirement so both axes encompass their data
+half_squares = max(half_squares_height, half_squares_weight)
 
-  half_m = max(vMax_m - midVal_m, midVal_m - vMin_m)
-  Round half_m UP to the nearest multiple of Y_GRID_SPEC[range][m].major.
-  yMin_m = midVal_m - half_m
-  yMax_m = midVal_m + half_m
-  (For weight, floor yMin at 0 — never negative.)
+# Each axis: midVal at canvas centre, half_squares above and below
+yMin_height = midVal_height - half_squares × htMajor
+yMax_height = midVal_height + half_squares × htMajor
+yMin_weight = midVal_weight - half_squares × wtMajor   // may go negative — that's fine
+yMax_weight = midVal_weight + half_squares × wtMajor
 
-  Build linear map: pixel_y = top + (yMax_m - val) / (yMax_m - yMin_m) * plotH
-  At val = midVal_m, pixel_y = top + plotH/2 ✓ (canvas vertical centre)
+# Canvas plot height
+plotH = 2 × half_squares × pxPerSquare
+
+# Linear maps (one per axis)
+height_pixel(val) = top + (yMax_height - val) / (yMax_height - yMin_height) × plotH
+weight_pixel(val) = top + (yMax_weight - val) / (yMax_weight - yMin_weight) × plotH
+
+# Verify alignment:
+# height_pixel(midVal_height) == top + plotH/2  ✓
+# weight_pixel(midVal_weight) == top + plotH/2  ✓
+# Same horizontal pixel line at every multiple of pxPerSquare is simultaneously
+#   a height major (every 5 cm from yMin_height upward) and
+#   a weight major (every 5 kg from yMin_weight upward).
 ```
 
-The two maps are independent. Their domains differ (cm vs kg), but both place the 50th centile at midAge at the same pixel — the canvas vertical centre. This is the alignment that produces the shared diagonal envelope.
+**Critical:** weight is NOT floored at 0 in the alignment math. If `yMin_weight < 0`, the gridlines extend full canvas height, but **weight labels are only drawn for values ≥ 0**. The bottom slice of the weight axis strip stays unlabelled. This is the trade-off that lets shared gridlines, 5 kg majors, and 50th-at-centre all coexist at 2–9y.
+
+The two maps are independent. Their value domains differ (cm vs kg) but pixel positions of major and minor gridlines coincide exactly, and both place the 50th centile at midAge at the same pixel — the canvas vertical centre. This is the alignment that produces the shared diagonal envelope.
 
 **Centile lines:**
-- All 9 lines for height in **height-curve colour** (suggest `#003078` — the existing height-dot navy).
-- All 9 lines for weight in **weight-curve colour** (suggest `#8B1A1A` — the existing weight-dot burgundy).
+- All 9 lines for height in **height-curve colour** (placeholder: `#003078`, existing height-dot navy — Nick is finalising palette via Claude Design; expect this to change).
+- All 9 lines for weight in **weight-curve colour** (placeholder: `#8B1A1A`, existing weight-dot burgundy — same caveat).
 - Dash pattern: same as Separate (`CENTILE_DASH` set). Same line weight (1.2px).
 - 50th NOT emphasised (per CLAUDE.md rule).
-- Right-edge labels: small ordinal centile labels at the right end of each line, in matching colour. Height labels live just inside the right margin's left edge; weight labels sit in the right margin proper. Don't let them collide — if they would, drop the weight labels for this Phase.
+- **No right-edge ordinal centile labels** in Combined view (deliberate — keeps charts lighter; the diagonal envelope + colour already encodes which line is which centile and which measurement).
+- Define palette as constants at the top of the new rendering block — `HEIGHT_CURVE_COLOR`, `WEIGHT_CURVE_COLOR` — so they can be retuned in one place.
 
 **Dataset boundary handling for 2–9y:** Inside this range, `generateCentileLines` already produces separate segments for `who_child` (≤4y) and `uk90_child` (≥4y). Draw each segment independently — never join across the boundary. This already works correctly in Separate; replicate the same logic.
 
@@ -161,17 +179,15 @@ Add a new toggle to the chart-toolbar (where Full/Zoom used to live). Two button
 
 ---
 
-## 4. Things to flag to Nick before implementing
+## 4. Decisions confirmed by Nick
 
-Open questions worth a short message before you start, even if you have an opinion:
+These resolve the open questions from the original draft. Treat them as binding for Phase 1.
 
-1. **Weight gridline density at 2–9y in Combined view.** Y_GRID_SPEC currently says major 5 kg, but v1.5.1 deliberately made the Separate weight panel taller with 2 kg squares for readability. In Combined view, do we want 5 kg or 2 kg majors on the right axis?
-2. **Height-only vs both-y-axes plot gridlines.** The plan says height-axis gridlines only run across the plot. If Nick wants paper-chart-faithful both-axis horizontal gridlines, that's a small change but visually busier.
-3. **Centile colour palette.** Suggested `#003078` (height) and `#8B1A1A` (weight) — these are the existing measurement-dot colours. Worth confirming, since this is the v2.0 visual identity.
-4. **Sex accent at 3% alpha as background tint** — confirm or veto. The v1.7 spec moved sex accent OUT of centile lines; v2.0 needs to give it a new home.
-5. **Right-edge centile labels** — keep them in Combined view, or drop entirely (the diagonal envelope already encodes which line is which centile, and the colour says which measurement). Lighter charts may be preferable.
-
-If Nick has not answered, default to the values stated in §3 Step 1B.
+1. **Weight gridline density at 2–9y:** keep 5 kg majors. (Reverts v1.5.1's 2-kg-tall-panel choice for the Combined view only — Separate view stays unchanged.)
+2. **Plot gridlines:** ONE shared set of horizontal gridlines that serve both axes simultaneously (see §3 Step 1B alignment algorithm). Compatible with 5 kg + 5 cm majors at 2–9y, with the trade-off that the weight axis may go below 0 — handled by suppressing weight labels in that region.
+3. **Centile colour palette:** placeholders `#003078` (height) and `#8B1A1A` (weight) for now. Nick is iterating with Claude Design and will provide final values once all charts render. Define as named constants so swapping is a single-line edit.
+4. **Sex accent's new home:** apply at two sites — (a) faint full-canvas background tint at ~3% alpha, (b) UI chrome (toolbar/range button accent, results-panel border). Centile lines are NOT sex-coloured in v2.0. Plotted measurement dots stay sex-neutral for Phase 1; revisit in Phase 3 when dots are wired in.
+5. **Right-edge centile labels:** drop them in Combined view to keep charts lighter.
 
 ---
 
