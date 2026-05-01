@@ -704,9 +704,23 @@
 <!-- Dev modal -->
 <div class="modal-overlay" id="devModal">
   <div class="modal">
-    <h2>&#128295; Developer — Calculation Verification</h2>
-    <p style="color:var(--muted);font-size:0.75rem;margin-bottom:12px">
-      Runs built-in test cases. SDS should match RCPCH API output within ±0.05.
+    <h2>&#128295; Developer Tools</h2>
+
+    <p style="color:var(--muted);font-size:0.75rem;margin:0 0 8px">
+      <strong>Sample patients</strong> — clears current data and loads a preset for testing.
+    </p>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
+      <button class="btn btn-secondary" onclick="loadSamplePatient('baby_boy')">Baby boy 4m</button>
+      <button class="btn btn-secondary" onclick="loadSamplePatient('baby_girl')">Baby girl 4m</button>
+      <button class="btn btn-secondary" onclick="loadSamplePatient('child_7y_boy')">Boy 7y</button>
+      <button class="btn btn-secondary" onclick="loadSamplePatient('child_7y_girl')">Girl 7y</button>
+      <button class="btn btn-secondary" onclick="loadSamplePatient('teen_14y_boy')">Boy 14y</button>
+      <button class="btn btn-secondary" onclick="loadSamplePatient('teen_14y_girl')">Girl 14y</button>
+      <button class="btn btn-secondary" onclick="loadSamplePatient('preterm_28w')">Preterm 28+0</button>
+    </div>
+
+    <p style="color:var(--muted);font-size:0.75rem;margin:0 0 8px">
+      <strong>Calculation verification</strong> — SDS should match RCPCH API within ±0.05.
     </p>
     <div id="testResults"></div>
     <div style="margin-top:14px;text-align:right">
@@ -2759,6 +2773,107 @@ const TEST_CASES = [
   { name: "Underweight infant wt",sex:"male",   dob:"2023-03-01", mdate:"2023-09-01", gw:40, gd:0, method:"weight", value:5.5,   expectedCentileMin:0,  expectedCentileMax:5  },
   { name: "Obese child wt",       sex:"female", dob:"2015-06-15", mdate:"2025-06-15", gw:40, gd:0, method:"weight", value:55,    expectedCentileMin:95, expectedCentileMax:100 },
 ];
+
+function loadSamplePatient(profile) {
+  // Date helpers — all relative to today so the chart always shows fresh data
+  function dateStr(d) { return d.toISOString().split('T')[0]; }
+  function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
+  function today() { return new Date(); }
+  function yearsAgo(y) { const d = today(); d.setFullYear(d.getFullYear() - y); return d; }
+  function monthsAgo(m) { const d = today(); d.setMonth(d.getMonth() - m); return d; }
+
+  const profiles = {
+    baby_boy: {
+      sex: 'male', gw: 40, gd: 0,
+      dob: monthsAgo(4),
+      rows: [
+        { offset: -30, ht: 57,  wt: 5.1  },  // ~1m
+        { offset:   0, ht: 63,  wt: 6.4  },  // ~4m
+      ]
+    },
+    baby_girl: {
+      sex: 'female', gw: 40, gd: 0,
+      dob: monthsAgo(4),
+      rows: [
+        { offset: -30, ht: 56,  wt: 4.7  },
+        { offset:   0, ht: 62,  wt: 5.9  },
+      ]
+    },
+    child_7y_boy: {
+      sex: 'male', gw: 40, gd: 0,
+      dob: yearsAgo(7),
+      rows: [
+        { offset: -730, ht: 108, wt: 17.5 },  // ~5y
+        { offset: -365, ht: 116, wt: 20.0 },  // ~6y
+        { offset:    0, ht: 121, wt: 23.0 },  // 7y
+      ]
+    },
+    child_7y_girl: {
+      sex: 'female', gw: 40, gd: 0,
+      dob: yearsAgo(7),
+      rows: [
+        { offset: -730, ht: 107, wt: 17.0 },
+        { offset: -365, ht: 115, wt: 19.5 },
+        { offset:    0, ht: 120, wt: 22.0 },
+      ]
+    },
+    teen_14y_boy: {
+      sex: 'male', gw: 40, gd: 0,
+      dob: yearsAgo(14),
+      rows: [
+        { offset: -730, ht: 148, wt: 38.0 },  // ~12y
+        { offset: -365, ht: 157, wt: 45.0 },  // ~13y
+        { offset:    0, ht: 163, wt: 52.0 },  // 14y
+      ]
+    },
+    teen_14y_girl: {
+      sex: 'female', gw: 40, gd: 0,
+      dob: yearsAgo(14),
+      rows: [
+        { offset: -730, ht: 152, wt: 42.0 },
+        { offset: -365, ht: 157, wt: 47.0 },
+        { offset:    0, ht: 160, wt: 52.0 },
+      ]
+    },
+    preterm_28w: {
+      sex: 'male', gw: 28, gd: 0,
+      dob: monthsAgo(4),  // 4 months chronological; corrected ~1.3m post-term
+      rows: [
+        { offset:    0, ht: 37,  wt: 1.0  },  // birth (same day as DOB)
+        { offset:  60, ht: 52,  wt: 3.1  },  // 2m chronological
+        { offset: 120, ht: 58,  wt: 4.6  },  // 4m chronological
+      ]
+    },
+  };
+
+  const p = profiles[profile];
+  if (!p) return;
+
+  // 1. Set sex
+  const sexRadio = document.querySelector(`input[name=sex][value="${p.sex}"]`);
+  if (sexRadio) { sexRadio.checked = true; applySexTheme(p.sex); }
+
+  // 2. Set DOB and gestation
+  document.getElementById('dob').value       = dateStr(p.dob);
+  document.getElementById('gestWeeks').value = p.gw;
+  document.getElementById('gestDays').value  = p.gd;
+
+  // 3. Clear rows and add new ones
+  document.getElementById('measurementRows').innerHTML = '';
+  rowCount = 0;
+  for (const row of p.rows) {
+    addMeasurementRow();
+    const d = addDays(p.dob, row.offset);
+    document.getElementById(`mdate-${rowCount}`).value = dateStr(d);
+    if (row.wt != null) document.getElementById(`mwt-${rowCount}`).value  = row.wt;
+    if (row.ht != null) document.getElementById(`mht-${rowCount}`).value  = row.ht;
+  }
+
+  // 4. Plot and close modal
+  closeDevModal();
+  plotCharts();
+  saveState();
+}
 
 function openDevModal() {
   const modal = document.getElementById("devModal");
