@@ -1317,13 +1317,18 @@ function drawSingleChart(canvasId, measurementMethod, color, title, cw, ch, isTo
         Math.abs(b.age - midAge) < Math.abs(a.age - midAge) ? b : a);
       const px50 = T.x(closest.age);
       const py50 = T.y(closest.vals[4]); // 50th = index 4
-      ctx.save();
-      ctx.fillStyle = 'rgba(110,110,110,0.55)';
-      ctx.font = '500 10px system-ui, -apple-system, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'bottom';
       const labelText = measurementMethod === 'height' ? 'height' : 'weight';
-      ctx.fillText(labelText, px50, py50 - 2);
+      ctx.font = 'bold 100px system-ui, -apple-system, sans-serif';
+      const fontSize = Math.round(100 * (T.plotW / 3) / ctx.measureText(labelText).width);
+      ctx.save();
+      ctx.beginPath(); ctx.rect(T.m.left, T.m.top, T.plotW, T.plotH); ctx.clip();
+      ctx.globalAlpha = 0.25;
+      ctx.fillStyle = centileColor;
+      ctx.font = `bold ${fontSize}px system-ui, -apple-system, sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.translate(px50, py50);
+      ctx.rotate(-20 * Math.PI / 180);
+      ctx.fillText(labelText, 0, 0);
       ctx.restore();
     }
   }
@@ -1576,29 +1581,44 @@ function drawSingleChart(canvasId, measurementMethod, color, title, cw, ch, isTo
     }
   }
 
-  // CENTILE LABELS at right margin — paper-chart style: 10px, matches line colour.
-  // Strip the 'th/nd/st/rd' suffix for a cleaner right-edge (e.g. "50" not "50th").
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.font = '10px sans-serif';
-  ctx.fillStyle = centileColor;
+  // CENTILE LABELS on line at left and right ends — within plot, white halo for legibility
+  ctx.save();
+  ctx.beginPath(); ctx.rect(T.m.left, T.m.top, T.plotW, T.plotH); ctx.clip();
+  ctx.font = '10px sans-serif'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
   for (let ci = 0; ci < CENTILE_LINES.length; ci++) {
     const label = CENTILE_LINES[ci].label.replace(/(th|nd|st|rd)$/, '');
-    let lastAge = -Infinity, lastVal = null;
+    let firstAge = Infinity, firstVal = null, lastAge = -Infinity, lastVal = null;
     for (const [ds, pts] of Object.entries(centileData)) {
       for (const pt of pts) {
-        if (pt.age <= ageMax + 0.05 && pt.age >= ageMin - 0.05 && pt.age > lastAge) {
-          lastAge = pt.age;
-          lastVal = pt.vals[ci];
-        }
+        if (pt.age < ageMin - 0.05 || pt.age > ageMax + 0.05) continue;
+        if (pt.age < firstAge) { firstAge = pt.age; firstVal = pt.vals[ci]; }
+        if (pt.age > lastAge)  { lastAge  = pt.age; lastVal  = pt.vals[ci]; }
       }
     }
-    if (lastVal == null) continue;
-    const px = T.x(Math.min(lastAge, ageMax));
-    const py = T.y(lastVal);
-    if (py < T.m.top || py > ch - T.m.bottom) continue;
-    ctx.fillText(label, cw - T.m.right + 2, py);
+    if (firstVal != null) {
+      const px = T.x(Math.max(firstAge, ageMin));
+      const py = T.y(firstVal);
+      if (py >= T.m.top && py <= ch - T.m.bottom) {
+        ctx.textAlign = 'left';
+        ctx.strokeStyle = 'white'; ctx.lineWidth = 3;
+        ctx.strokeText(label, px + 4, py);
+        ctx.fillStyle = centileColor;
+        ctx.fillText(label, px + 4, py);
+      }
+    }
+    if (lastVal != null) {
+      const px = T.x(Math.min(lastAge, ageMax));
+      const py = T.y(lastVal);
+      if (py >= T.m.top && py <= ch - T.m.bottom) {
+        ctx.textAlign = 'right';
+        ctx.strokeStyle = 'white'; ctx.lineWidth = 3;
+        ctx.strokeText(label, px - 4, py);
+        ctx.fillStyle = centileColor;
+        ctx.fillText(label, px - 4, py);
+      }
+    }
   }
+  ctx.restore();
 
   // Store transform for pan handling
   canvas._transform = T;
@@ -1873,11 +1893,15 @@ const WEIGHT_CURVE_COLOR = '#8B1A1A';
 //   drawCombinedChart() → persists chosen ratio to localStorage.
 // ============================================================
 const COMBINED_CHART_CONFIG = {
-  '0-1':  { ageMin: 0,  ageMax: 1,  HT_ANCHOR: 60,  WT_ANCHOR: 13,  STEP_HT: 1, STEP_WT: 1,  drawMinors: false, WT_MAJOR: 0.375 },
-  '1-4':  { ageMin: 1,  ageMax: 4,  HT_ANCHOR: 84,  WT_ANCHOR: 23,  STEP_HT: 1, STEP_WT: 2,  drawMinors: true,  WT_MAJOR: 0.5  },
-  '2-9':  { ageMin: 2,  ageMax: 9,  ageMax_F: 8,  HT_ANCHOR: 100, WT_ANCHOR: 50,  HT_ANCHOR_F: 95,  WT_ANCHOR_F: 45,  STEP_HT: 3, STEP_WT: 5,  drawMinors: true,  WT_MAJOR: 3  },
+  '0-1':  { ageMin: 0,  ageMax: 1,  HT_ANCHOR: 60,  WT_ANCHOR: 13,  STEP_HT: 1, STEP_WT: 1,  drawMinors: false, WT_MAJOR: 0.375,
+            LEFT_WT_MAX: 7,  LEFT_HT_MIN: 44, RIGHT_WT_MAX: 13.5, RIGHT_HT_MIN: 64,  LABEL_HT_STEP: 5 },
+  '1-4':  { ageMin: 1,  ageMax: 4,  HT_ANCHOR: 84,  WT_ANCHOR: 23,  STEP_HT: 1, STEP_WT: 2,  drawMinors: true,  WT_MAJOR: 0.5,
+            LEFT_WT_MAX: 14, LEFT_HT_MIN: 64, RIGHT_WT_MAX: 25,   RIGHT_HT_MIN: 88,  LABEL_HT_STEP: 5 },
+  '2-9':  { ageMin: 2,  ageMax: 9,  ageMax_F: 8,  HT_ANCHOR: 100, WT_ANCHOR: 50,  HT_ANCHOR_F: 95,  WT_ANCHOR_F: 45,  STEP_HT: 3, STEP_WT: 5,  drawMinors: true,  WT_MAJOR: 3,
+            LEFT_WT_MAX: 20, LEFT_HT_MIN: 75, RIGHT_WT_MAX: 50,   RIGHT_HT_MIN: 105, LABEL_HT_STEP: 5 },
   '9-18': { ageMin: 9,  ageMax: 18, ageMin_F: 8,  HT_ANCHOR: 125, WT_ANCHOR: 100, HT_ANCHOR_F: 125, WT_ANCHOR_F: 90,  STEP_HT: 3, STEP_WT: 5,  drawMinors: true,  WT_MAJOR: 3,
-            LEFT_WT_MAX: 80, LEFT_HT_MIN: 110, RIGHT_WT_MAX: 100, RIGHT_HT_MIN: 135, LABEL_HT_STEP: 5 },
+            LEFT_WT_MAX: 80, LEFT_HT_MIN: 110, RIGHT_WT_MAX: 100, RIGHT_HT_MIN: 135,
+            LEFT_WT_MAX_F: 70, LEFT_HT_MIN_F: 110, RIGHT_WT_MAX_F: 95, RIGHT_HT_MIN_F: 135, LABEL_HT_STEP: 5 },
 };
 
 function drawCombinedChart(canvasId, range, cw) {
@@ -2109,11 +2133,17 @@ function drawCombinedChart(canvasId, range, cw) {
       }
     }
     if (!best) return;
+    ctx.font = 'bold 100px system-ui, -apple-system, sans-serif';
+    const fontSize = Math.round(100 * (plotW / 3) / ctx.measureText(labelText).width);
     ctx.save();
-    ctx.fillStyle = 'rgba(110,110,110,0.55)';
-    ctx.font = '500 10px system-ui, -apple-system, sans-serif';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-    ctx.fillText(labelText, xPx(best.age), yFn(best.vals[4]) - 2);
+    ctx.beginPath(); ctx.rect(m.left, m.top, plotW, plotH); ctx.clip();
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = accentColor;
+    ctx.font = `bold ${fontSize}px system-ui, -apple-system, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.translate(xPx(best.age), yFn(best.vals[4]));
+    ctx.rotate(-20 * Math.PI / 180);
+    ctx.fillText(labelText, 0, 0);
     ctx.restore();
   }
   draw50thLabel(htCache, htY, 'height');
@@ -2140,27 +2170,48 @@ function drawCombinedChart(canvasId, range, cw) {
     canvas._hitAreas.push({ x: px, y: py, r: 9, data: meas, isCorrected: meas.corrAge !== meas.chronAge });
   }
 
-  // ── WEIGHT CENTILE LABELS inside plot at right edge ──────────
-  // Drawn inside clip so they don't spill into the kg axis area.
-  ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.font = '10px sans-serif';
-  ctx.fillStyle = accentColor;
-  for (let ci = 0; ci < CENTILE_LINES.length; ci++) {
-    const wLabel = CENTILE_LINES[ci].label.replace(/(th|nd|st|rd)$/, '');
-    let wLastAge = -Infinity, wLastVal = null;
-    for (const pts of Object.values(wtCache)) {
-      for (const pt of pts) {
-        if (pt.age <= ageMax + 0.05 && pt.age >= ageMin - 0.05 && pt.age > wLastAge) {
-          wLastAge = pt.age; wLastVal = pt.vals[ci];
+  ctx.restore(); // end clip
+
+  // ── CENTILE LABELS on line at left and right ends ─────────────────────
+  ctx.save();
+  ctx.beginPath(); ctx.rect(m.left, m.top, plotW, plotH); ctx.clip();
+  ctx.font = '10px sans-serif'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+  for (const [labelCache, yFn] of [[htCache, htY], [wtCache, wtY]]) {
+    for (let ci = 0; ci < CENTILE_LINES.length; ci++) {
+      const label = CENTILE_LINES[ci].label.replace(/(th|nd|st|rd)$/, '');
+      let firstAge = Infinity, firstVal = null, lastAge = -Infinity, lastVal = null;
+      for (const pts of Object.values(labelCache)) {
+        for (const pt of pts) {
+          if (pt.age < ageMin - 0.05 || pt.age > ageMax + 0.05) continue;
+          if (pt.age < firstAge) { firstAge = pt.age; firstVal = pt.vals[ci]; }
+          if (pt.age > lastAge)  { lastAge  = pt.age; lastVal  = pt.vals[ci]; }
+        }
+      }
+      if (firstVal != null) {
+        const px = xPx(Math.max(firstAge, ageMin));
+        const py = yFn(firstVal);
+        if (py >= m.top && py <= m.top + plotH) {
+          ctx.textAlign = 'left';
+          ctx.strokeStyle = 'white'; ctx.lineWidth = 3;
+          ctx.strokeText(label, px + 4, py);
+          ctx.fillStyle = accentColor;
+          ctx.fillText(label, px + 4, py);
+        }
+      }
+      if (lastVal != null) {
+        const px = xPx(Math.min(lastAge, ageMax));
+        const py = yFn(lastVal);
+        if (py >= m.top && py <= m.top + plotH) {
+          ctx.textAlign = 'right';
+          ctx.strokeStyle = 'white'; ctx.lineWidth = 3;
+          ctx.strokeText(label, px - 4, py);
+          ctx.fillStyle = accentColor;
+          ctx.fillText(label, px - 4, py);
         }
       }
     }
-    if (wLastVal == null) continue;
-    const wPy = wtY(wLastVal);
-    if (wPy < m.top + 2 || wPy > m.top + plotH - 2) continue;
-    ctx.fillText(wLabel, m.left + plotW - 2, wPy);
   }
-
-  ctx.restore(); // end clip
+  ctx.restore();
 
   // ── BORDER ───────────────────────────────────────────────────
   ctx.strokeStyle = '#999'; ctx.lineWidth = 0.5; ctx.setLineDash([]);
@@ -2282,24 +2333,6 @@ function drawCombinedChart(canvasId, range, cw) {
   ctx.fillStyle = '#666'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
   ctx.fillText('Age', m.left + plotW / 2, ch - 2);
 
-  // ── HEIGHT CENTILE LABELS in right margin ─────────────────────
-  ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.font = '10px sans-serif';
-  ctx.fillStyle = accentColor;
-  for (let ci = 0; ci < CENTILE_LINES.length; ci++) {
-    const hLabel = CENTILE_LINES[ci].label.replace(/(th|nd|st|rd)$/, '');
-    let hLastAge = -Infinity, hLastVal = null;
-    for (const pts of Object.values(htCache)) {
-      for (const pt of pts) {
-        if (pt.age <= ageMax + 0.05 && pt.age >= ageMin - 0.05 && pt.age > hLastAge) {
-          hLastAge = pt.age; hLastVal = pt.vals[ci];
-        }
-      }
-    }
-    if (hLastVal == null) continue;
-    const hPy = htY(hLastVal);
-    if (hPy < m.top || hPy > m.top + plotH) continue;
-    ctx.fillText(hLabel, m.left + plotW + 2, hPy);
-  }
 
   // ── TOP-MARGIN AGE LABELS (small, muted — matches separate view) ─
   ctx.font = '8px sans-serif'; ctx.fillStyle = '#999';
