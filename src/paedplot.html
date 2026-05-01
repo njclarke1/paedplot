@@ -899,6 +899,11 @@ function applySexTheme(sex) {
   if (typeof document === 'undefined' || !document.body) return;
   document.body.classList.toggle('sex-girls', sex === 'female');
   document.body.classList.toggle('sex-boys',  sex !== 'female');
+  const isFemale = sex === 'female';
+  const btn29  = document.getElementById('btn29');
+  const btn918 = document.getElementById('btn918');
+  if (btn29)  btn29.textContent  = isFemale ? '2–8y'  : '2–9y';
+  if (btn918) btn918.textContent = isFemale ? '8–18y' : '9–18y';
 }
 
 function centileBandText(sds) {
@@ -1097,8 +1102,8 @@ function getRangeLimits() {
     case 'preterm':return { ageMin: -17/52.18, ageMax: 2/52.18 }; // 23w→42w gestation (dedicated preterm chart)
     case '0-1':  return { ageMin: chartState.showPreterm ? -0.33 : 0.0, ageMax: 1.0 }; // preterm optional
     case '1-4':  return { ageMin:  1.0,  ageMax: 4.0  }; // 1-4y exact
-    case '2-9':  return { ageMin:  2.0,  ageMax: 9.0  }; // 2-9y exact
-    case '9-18': return { ageMin:  9.0,  ageMax: 18.0 }; // 9-18y exact
+    case '2-9':  return { ageMin:  2.0,  ageMax: chartState.sex === 'female' ? 8.0 : 9.0  }; // girls: 2-8y; boys: 2-9y
+    case '9-18': return { ageMin:  chartState.sex === 'female' ? 8.0 : 9.0,  ageMax: 18.0 }; // girls: 8-18y; boys: 9-18y
     default:     return { ageMin:  2.0,  ageMax: 18.0 }; // '2-18'
   }
 }
@@ -1870,8 +1875,9 @@ const WEIGHT_CURVE_COLOR = '#8B1A1A';
 const COMBINED_CHART_CONFIG = {
   '0-1':  { ageMin: 0,  ageMax: 1,  HT_ANCHOR: 60,  WT_ANCHOR: 13,  STEP_HT: 1, STEP_WT: 1,  drawMinors: false, WT_MAJOR: 0.375 },
   '1-4':  { ageMin: 1,  ageMax: 4,  HT_ANCHOR: 84,  WT_ANCHOR: 23,  STEP_HT: 1, STEP_WT: 2,  drawMinors: true,  WT_MAJOR: 0.5  },
-  '2-9':  { ageMin: 2,  ageMax: 9,  HT_ANCHOR: 100, WT_ANCHOR: 50,  HT_ANCHOR_F: 95,  WT_ANCHOR_F: 45,  STEP_HT: 3, STEP_WT: 5,  drawMinors: true,  WT_MAJOR: 3  },
-  '9-18': { ageMin: 9,  ageMax: 18, HT_ANCHOR: 125, WT_ANCHOR: 105, HT_ANCHOR_F: 125, WT_ANCHOR_F: 90,  STEP_HT: 3, STEP_WT: 5,  drawMinors: true,  WT_MAJOR: 3  },
+  '2-9':  { ageMin: 2,  ageMax: 9,  ageMax_F: 8,  HT_ANCHOR: 100, WT_ANCHOR: 50,  HT_ANCHOR_F: 95,  WT_ANCHOR_F: 45,  STEP_HT: 3, STEP_WT: 5,  drawMinors: true,  WT_MAJOR: 3  },
+  '9-18': { ageMin: 9,  ageMax: 18, ageMin_F: 8,  HT_ANCHOR: 125, WT_ANCHOR: 100, HT_ANCHOR_F: 125, WT_ANCHOR_F: 90,  STEP_HT: 3, STEP_WT: 5,  drawMinors: true,  WT_MAJOR: 3,
+            LEFT_WT_MAX: 80, LEFT_HT_MIN: 110, RIGHT_WT_MAX: 100, RIGHT_HT_MIN: 135, LABEL_HT_STEP: 5 },
 };
 
 function drawCombinedChart(canvasId, range, cw) {
@@ -1886,8 +1892,10 @@ function drawCombinedChart(canvasId, range, cw) {
   const wtCache = chartState.wtCentileCache;
   if (!htCache || !wtCache) return;
 
-  const { ageMin, ageMax, STEP_HT, STEP_WT, drawMinors } = cfg;
+  const { STEP_HT, STEP_WT, drawMinors } = cfg;
   const isFemale  = chartState.sex === 'female';
+  const ageMin    = (isFemale && cfg.ageMin_F != null) ? cfg.ageMin_F : cfg.ageMin;
+  const ageMax    = (isFemale && cfg.ageMax_F != null) ? cfg.ageMax_F : cfg.ageMax;
   const HT_ANCHOR = (isFemale && cfg.HT_ANCHOR_F != null) ? cfg.HT_ANCHOR_F : cfg.HT_ANCHOR;
   const WT_ANCHOR = (isFemale && cfg.WT_ANCHOR_F != null) ? cfg.WT_ANCHOR_F : cfg.WT_ANCHOR;
   const dpr  = window.devicePixelRatio || 1;
@@ -2158,38 +2166,97 @@ function drawCombinedChart(canvasId, range, cw) {
   ctx.strokeStyle = '#999'; ctx.lineWidth = 0.5; ctx.setLineDash([]);
   ctx.strokeRect(m.left, m.top, plotW, plotH);
 
-  // ── LEFT Y-AXIS: HEIGHT (cm) ─────────────────────────────────
-  ctx.font = '10px sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-  for (let htVal = htMin; htVal <= htMax + 0.001; htVal += STEP_HT) {
-    const py = htY(htVal);
-    if (py < m.top - 1 || py > m.top + plotH + 1) continue;
-    ctx.strokeStyle = '#888'; ctx.lineWidth = 0.7;
-    ctx.beginPath(); ctx.moveTo(m.left - 3, py); ctx.lineTo(m.left, py); ctx.stroke();
-    ctx.fillStyle = '#333';
-    ctx.fillText(Math.round(htVal).toString(), m.left - 5, py);
-  }
-  ctx.save();
-  ctx.fillStyle = '#666'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
-  ctx.translate(10, (htY(htMin) + htY(htMax)) / 2); ctx.rotate(-Math.PI / 2);
-  ctx.fillText('cm', 0, 0);
-  ctx.restore();
+  // ── Y-AXIS LABELS ─────────────────────────────────────────────────────────
+  // dual-axis mode: weight (black) on lower portion, height (accent) on upper portion of each side.
+  // Cutoffs per range/sex defined in COMBINED_CHART_CONFIG as LEFT_WT_MAX / LEFT_HT_MIN etc.
+  const htLabelColor = isFemale ? '#c9559d' : '#1f81c3';
+  const leftWtMax  = (isFemale && cfg.LEFT_WT_MAX_F  != null) ? cfg.LEFT_WT_MAX_F  : (cfg.LEFT_WT_MAX  ?? null);
+  const leftHtMin  = (isFemale && cfg.LEFT_HT_MIN_F  != null) ? cfg.LEFT_HT_MIN_F  : (cfg.LEFT_HT_MIN  ?? null);
+  const rightWtMax = (isFemale && cfg.RIGHT_WT_MAX_F != null) ? cfg.RIGHT_WT_MAX_F : (cfg.RIGHT_WT_MAX ?? null);
+  const rightHtMin = (isFemale && cfg.RIGHT_HT_MIN_F != null) ? cfg.RIGHT_HT_MIN_F : (cfg.RIGHT_HT_MIN ?? null);
+  const dualLabels = leftWtMax != null && leftHtMin != null && rightWtMax != null && rightHtMin != null;
+  const labelHtStep = cfg.LABEL_HT_STEP ?? STEP_HT;
 
-  // ── RIGHT Y-AXIS: WEIGHT (kg) ────────────────────────────────
-  ctx.font = '10px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-  for (let wtVal = wtMin; wtVal <= wtMax + 0.001; wtVal += STEP_WT) {
-    if (wtVal < 0) continue;
-    const py = wtY(wtVal);
-    if (py < m.top - 1 || py > m.top + plotH + 1) continue;
-    ctx.strokeStyle = '#888'; ctx.lineWidth = 0.7;
-    ctx.beginPath(); ctx.moveTo(m.left + plotW, py); ctx.lineTo(m.left + plotW + 3, py); ctx.stroke();
-    ctx.fillStyle = '#555';
-    ctx.fillText(STEP_WT < 1 ? wtVal.toFixed(1) : Math.round(wtVal).toString(), m.left + plotW + 5, py);
+  ctx.font = '10px sans-serif'; ctx.textBaseline = 'middle';
+
+  // ── LEFT AXIS ──────────────────────────────────────────────
+  ctx.textAlign = 'right';
+  if (dualLabels) {
+    // Weight (black) — from data floor up to leftWtMax
+    for (let wv = Math.ceil(wtMin / STEP_WT) * STEP_WT; wv <= leftWtMax + 0.001; wv = Math.round((wv + STEP_WT) * 1e6) / 1e6) {
+      if (wv < 0) continue;
+      const py = wtY(wv);
+      if (py < m.top - 1 || py > m.top + plotH + 1) continue;
+      ctx.strokeStyle = '#888'; ctx.lineWidth = 0.7;
+      ctx.beginPath(); ctx.moveTo(m.left - 3, py); ctx.lineTo(m.left, py); ctx.stroke();
+      ctx.fillStyle = '#222';
+      ctx.fillText(Math.round(wv).toString(), m.left - 5, py);
+    }
+    // Height (accent) — labelHtStep increments from first multiple >= leftHtMin
+    for (let hv = Math.ceil(leftHtMin / labelHtStep) * labelHtStep; hv <= htMax + 0.001; hv += labelHtStep) {
+      const py = htY(hv);
+      if (py < m.top - 1 || py > m.top + plotH + 1) continue;
+      ctx.strokeStyle = '#888'; ctx.lineWidth = 0.7;
+      ctx.beginPath(); ctx.moveTo(m.left - 3, py); ctx.lineTo(m.left, py); ctx.stroke();
+      ctx.fillStyle = htLabelColor;
+      ctx.fillText(Math.round(hv).toString(), m.left - 5, py);
+    }
+  } else {
+    // Fallback: height only
+    for (let htVal = htMin; htVal <= htMax + 0.001; htVal += STEP_HT) {
+      const py = htY(htVal);
+      if (py < m.top - 1 || py > m.top + plotH + 1) continue;
+      ctx.strokeStyle = '#888'; ctx.lineWidth = 0.7;
+      ctx.beginPath(); ctx.moveTo(m.left - 3, py); ctx.lineTo(m.left, py); ctx.stroke();
+      ctx.fillStyle = '#333';
+      ctx.fillText(Math.round(htVal).toString(), m.left - 5, py);
+    }
+    ctx.save();
+    ctx.fillStyle = '#666'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
+    ctx.translate(10, (htY(htMin) + htY(htMax)) / 2); ctx.rotate(-Math.PI / 2);
+    ctx.fillText('cm', 0, 0);
+    ctx.restore();
   }
-  ctx.save();
-  ctx.fillStyle = '#666'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
-  ctx.translate(actualCw - 10, (wtY(wtMin) + wtY(wtMax)) / 2); ctx.rotate(Math.PI / 2);
-  ctx.fillText('kg', 0, 0);
-  ctx.restore();
+
+  // ── RIGHT AXIS ─────────────────────────────────────────────
+  ctx.font = '10px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  if (dualLabels) {
+    // Weight (black) — from data floor up to rightWtMax
+    for (let wv = Math.ceil(wtMin / STEP_WT) * STEP_WT; wv <= rightWtMax + 0.001; wv = Math.round((wv + STEP_WT) * 1e6) / 1e6) {
+      if (wv < 0) continue;
+      const py = wtY(wv);
+      if (py < m.top - 1 || py > m.top + plotH + 1) continue;
+      ctx.strokeStyle = '#888'; ctx.lineWidth = 0.7;
+      ctx.beginPath(); ctx.moveTo(m.left + plotW, py); ctx.lineTo(m.left + plotW + 3, py); ctx.stroke();
+      ctx.fillStyle = '#222';
+      ctx.fillText(Math.round(wv).toString(), m.left + plotW + 5, py);
+    }
+    // Height (accent) — labelHtStep increments from first multiple >= rightHtMin
+    for (let hv = Math.ceil(rightHtMin / labelHtStep) * labelHtStep; hv <= htMax + 0.001; hv += labelHtStep) {
+      const py = htY(hv);
+      if (py < m.top - 1 || py > m.top + plotH + 1) continue;
+      ctx.strokeStyle = '#888'; ctx.lineWidth = 0.7;
+      ctx.beginPath(); ctx.moveTo(m.left + plotW, py); ctx.lineTo(m.left + plotW + 3, py); ctx.stroke();
+      ctx.fillStyle = htLabelColor;
+      ctx.fillText(Math.round(hv).toString(), m.left + plotW + 5, py);
+    }
+  } else {
+    // Fallback: weight only
+    for (let wtVal = wtMin; wtVal <= wtMax + 0.001; wtVal += STEP_WT) {
+      if (wtVal < 0) continue;
+      const py = wtY(wtVal);
+      if (py < m.top - 1 || py > m.top + plotH + 1) continue;
+      ctx.strokeStyle = '#888'; ctx.lineWidth = 0.7;
+      ctx.beginPath(); ctx.moveTo(m.left + plotW, py); ctx.lineTo(m.left + plotW + 3, py); ctx.stroke();
+      ctx.fillStyle = '#555';
+      ctx.fillText(STEP_WT < 1 ? wtVal.toFixed(1) : Math.round(wtVal).toString(), m.left + plotW + 5, py);
+    }
+    ctx.save();
+    ctx.fillStyle = '#666'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
+    ctx.translate(actualCw - 10, (wtY(wtMin) + wtY(wtMax)) / 2); ctx.rotate(Math.PI / 2);
+    ctx.fillText('kg', 0, 0);
+    ctx.restore();
+  }
 
   // ── LEFT AXIS LINE + BOTTOM X-AXIS LINE ─────────────────────
   ctx.strokeStyle = '#666'; ctx.lineWidth = 1; ctx.setLineDash([]);
