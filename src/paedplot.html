@@ -663,6 +663,11 @@
         <div class="ctrl-group" id="pretGroup" style="display:none">
           <button class="ctrl-btn" id="btnPreterm" onclick="togglePreterm()">+ Preterm</button>
         </div>
+        <div class="ctrl-sep"></div>
+        <div class="ctrl-group">
+          <button class="ctrl-btn active" id="btnCombined"  onclick="setViewMode('combined')">Combined</button>
+          <button class="ctrl-btn"        id="btnSeparate"  onclick="setViewMode('separate')">Separate</button>
+        </div>
       </div>
 
       <!-- Stacked charts -->
@@ -975,6 +980,7 @@ let chartState = {
   sex: 'male',
   range: '0-1',        // '0-1' | '1-4' | '2-9' | '9-18' | '2-18'
   showPreterm: false,  // whether to show preterm section on 0-1y chart
+  viewMode: 'combined', // 'combined' | 'separate' — v2.0 Phase 1
   htMeasurements: [],
   wtMeasurements: [],
   gestWeeks: 40,
@@ -1770,6 +1776,304 @@ function getGridSpec(range) {
   }
 }
 
+function setViewMode(mode) {
+  chartState.viewMode = mode;
+  const btnC = document.getElementById('btnCombined');
+  const btnS = document.getElementById('btnSeparate');
+  if (btnC) btnC.classList.toggle('active', mode === 'combined');
+  if (btnS) btnS.classList.toggle('active', mode === 'separate');
+  renderBothCharts();
+  saveState();
+}
+
+// ============================================================
+// COMBINED CHART RENDERER (v2.0 Phase 1 — 2-9y only)
+// Single canvas with height centile lines on left y-axis (cm)
+// and weight centile lines on right y-axis (kg). Both axes share
+// the same horizontal gridline pixel positions via the alignment
+// algorithm: 50th centile of each measurement at midAge (5.5y)
+// maps to the canvas vertical centre.
+// ============================================================
+
+// Placeholder colours — update when Nick finalises palette via Claude Design
+const HEIGHT_CURVE_COLOR = '#003078';
+const WEIGHT_CURVE_COLOR = '#8B1A1A';
+
+function drawCombinedChart(canvasId, range, cw) {
+  if (range !== '2-9') {
+    console.info('drawCombinedChart: Phase 1 supports 2-9y only — got ' + range);
+    return;
+  }
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const htCache = chartState.htCentileCache;
+  const wtCache = chartState.wtCentileCache;
+  if (!htCache || !wtCache) return;
+
+  // ── AGE LIMITS ──────────────────────────────────────────────
+  const ageMin = 2.0, ageMax = 9.0, midAge = 5.5;
+
+  // ── X-AXIS GEOMETRY (same grid-square logic as Separate) ────
+  const grid   = GRID['2-9'];
+  const availW = cw - CHART_MARGINS.left - CHART_MARGINS.right;
+  const xSq    = (ageMax - ageMin) / grid.xYears;
+  const pxSq   = Math.max(MIN_PX_PER_SQUARE, Math.min(MAX_PX_PER_SQUARE, availW / xSq));
+  const plotW  = pxSq * xSq;
+  const actualCw = Math.round(plotW + CHART_MARGINS.left + CHART_MARGINS.right);
+
+  // ── Y-AXIS ALIGNMENT ALGORITHM ──────────────────────────────
+  // Both axes: midVal (50th at midAge) at canvas vertical centre.
+  // halfSquares guarantees shared gridline pixel positions.
+  const htMajor = Y_GRID_SPEC['2-9'].height.major; // 5 cm
+  const wtMajor = Y_GRID_SPEC['2-9'].weight.major; // 5 kg
+
+  function get50thAtAge(cache, targetAge) {
+    let best = null, bestDist = Infinity;
+    for (const pts of Object.values(cache)) {
+      for (const pt of pts) {
+        const d = Math.abs(pt.age - targetAge);
+        if (d < bestDist) { bestDist = d; best = pt; }
+      }
+    }
+    return best ? best.vals[4] : null; // vals[4] = 50th centile
+  }
+
+  function getEnvelope(cache) {
+    let vMin = Infinity, vMax = -Infinity;
+    for (const pts of Object.values(cache)) {
+      for (const pt of pts) {
+        if (pt.age < ageMin - 0.02 || pt.age > ageMax + 0.02) continue;
+        vMin = Math.min(vMin, pt.vals[0]); // 0.4th
+        vMax = Math.max(vMax, pt.vals[8]); // 99.6th
+      }
+    }
+    return { vMin, vMax };
+  }
+
+  const midHt = get50thAtAge(htCache, midAge);
+  const midWt = get50thAtAge(wtCache, midAge);
+  if (midHt == null || midWt == null) return;
+
+  const { vMin: htMin, vMax: htMax } = getEnvelope(htCache);
+  const { vMin: wtMin, vMax: wtMax } = getEnvelope(wtCache);
+
+  const htHalf = Math.ceil(Math.max(htMax - midHt, midHt - htMin) / htMajor);
+  const wtHalf = Math.ceil(Math.max(wtMax - midWt, midWt - wtMin) / wtMajor);
+  const halfSq = Math.max(htHalf, wtHalf);
+
+  const yMinHt = midHt - halfSq * htMajor;
+  const yMaxHt = midHt + halfSq * htMajor;
+  const yMinWt = midWt - halfSq * wtMajor;
+  const yMaxWt = midWt + halfSq * wtMajor;
+
+  // ── CANVAS DIMENSIONS ───────────────────────────────────────
+  const m = { top: 20, right: 52, bottom: 42, left: 50 };
+  const plotH = 2 * halfSq * pxSq;
+  const ch    = Math.round(plotH + m.top + m.bottom);
+  canvas.width  = actualCw;
+  canvas.height = ch;
+
+  const ctx = canvas.getContext('2d');
+
+  // ── PIXEL MAPPING ───────────────────────────────────────────
+  function xPx(age) { return m.left + (age - ageMin) / (ageMax - ageMin) * plotW; }
+  function htY(val) { return m.top  + (yMaxHt - val) / (yMaxHt - yMinHt) * plotH; }
+  function wtY(val) { return m.top  + (yMaxWt - val) / (yMaxWt - yMinWt) * plotH; }
+
+  // ── BACKGROUND ──────────────────────────────────────────────
+  ctx.fillStyle = '#FFFDF0';
+  ctx.fillRect(0, 0, actualCw, ch);
+
+  // Faint sex-accent tint over the entire canvas
+  const accent = getAccentColor(chartState.sex);
+  ctx.fillStyle = accent + '08'; // ~3% alpha
+  ctx.fillRect(0, 0, actualCw, ch);
+
+  // ── CLIP TO PLOT AREA ────────────────────────────────────────
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(m.left, m.top, plotW, plotH);
+  ctx.clip();
+
+  // ── SHARED HORIZONTAL GRIDLINES ─────────────────────────────
+  // One set serves both axes. Major every pxSq, minor every pxSq/5.
+  // Drawn from top of plot; each gridline is simultaneously a height
+  // major (every 5 cm) and a weight major (every 5 kg).
+  const majorCount = halfSq * 2; // total major grid rows
+  for (let i = 0; i <= majorCount; i++) {
+    const py = m.top + i * pxSq;
+    // Minor lines between this major and next
+    if (i < majorCount) {
+      const minorStep = pxSq / 5;
+      for (let j = 1; j < 5; j++) {
+        const mpy = py + j * minorStep;
+        ctx.strokeStyle = '#D3D3D3';
+        ctx.lineWidth = 0.5;
+        ctx.setLineDash([1, 4]);
+        ctx.beginPath();
+        ctx.moveTo(m.left, mpy);
+        ctx.lineTo(m.left + plotW, mpy);
+        ctx.stroke();
+      }
+    }
+    // Major gridline
+    ctx.strokeStyle = '#BFBFBF';
+    ctx.lineWidth = 0.6;
+    ctx.setLineDash([1, 3]);
+    ctx.beginPath();
+    ctx.moveTo(m.left, py);
+    ctx.lineTo(m.left + plotW, py);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // ── VERTICAL GRIDLINES (x-axis) ─────────────────────────────
+  const gridSpec = getGridSpec('2-9');
+  ctx.strokeStyle = '#D3D3D3';
+  ctx.lineWidth = 0.5;
+  ctx.setLineDash([1, 4]);
+  for (const g of gridSpec.minorGrid) {
+    if (g.age < ageMin - 0.01 || g.age > ageMax + 0.01) continue;
+    const gx = xPx(g.age);
+    ctx.beginPath(); ctx.moveTo(gx, m.top); ctx.lineTo(gx, m.top + plotH); ctx.stroke();
+  }
+  ctx.strokeStyle = '#BFBFBF';
+  ctx.lineWidth = 0.6;
+  ctx.setLineDash([1, 3]);
+  for (const g of gridSpec.majorGrid) {
+    if (g.age < ageMin - 0.01 || g.age > ageMax + 0.01) continue;
+    const gx = xPx(g.age);
+    ctx.beginPath(); ctx.moveTo(gx, m.top); ctx.lineTo(gx, m.top + plotH); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // ── CENTILE LINES ────────────────────────────────────────────
+  function drawCentileSet(cache, colorHex, yFn) {
+    for (const [ds, pts] of Object.entries(cache)) {
+      const inRange = pts.filter(p => p.age >= ageMin - 0.02 && p.age <= ageMax + 0.02);
+      if (inRange.length < 2) continue;
+      for (let ci = 0; ci < CENTILE_LINES.length; ci++) {
+        const dashed = CENTILE_DASH.has(CENTILE_LINES[ci].label);
+        ctx.beginPath();
+        ctx.strokeStyle = colorHex;
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash(dashed ? [4, 4] : []);
+        let first = true;
+        for (const pt of inRange) {
+          const px = xPx(pt.age);
+          const py = yFn(pt.vals[ci]);
+          if (first) { ctx.moveTo(px, py); first = false; }
+          else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+  }
+  drawCentileSet(htCache, HEIGHT_CURVE_COLOR, htY);
+  drawCentileSet(wtCache, WEIGHT_CURVE_COLOR, wtY);
+
+  // Band labels on 50th centile at midAge — replacing right-edge labels
+  function draw50thLabel(cache, colorHex, yFn, labelText) {
+    let best = null, bestDist = Infinity;
+    for (const pts of Object.values(cache)) {
+      for (const pt of pts) {
+        const d = Math.abs(pt.age - midAge);
+        if (d < bestDist) { bestDist = d; best = pt; }
+      }
+    }
+    if (!best) return;
+    const px = xPx(best.age);
+    const py = yFn(best.vals[4]);
+    ctx.save();
+    ctx.fillStyle = colorHex + 'AA'; // semi-transparent
+    ctx.font = '500 10px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(labelText, px, py - 2);
+    ctx.restore();
+  }
+  draw50thLabel(htCache, HEIGHT_CURVE_COLOR, htY, 'height');
+  draw50thLabel(wtCache, WEIGHT_CURVE_COLOR, wtY, 'weight');
+
+  // ── RESTORE CLIP ────────────────────────────────────────────
+  ctx.restore();
+
+  // ── PLOT BORDER ─────────────────────────────────────────────
+  ctx.strokeStyle = '#999';
+  ctx.lineWidth = 0.5;
+  ctx.setLineDash([]);
+  ctx.strokeRect(m.left, m.top, plotW, plotH);
+
+  // ── LEFT Y-AXIS LABELS (height, cm) ─────────────────────────
+  ctx.font = '9px sans-serif';
+  ctx.fillStyle = HEIGHT_CURVE_COLOR;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i <= majorCount; i++) {
+    const val = yMaxHt - i * htMajor;
+    const py = m.top + i * pxSq;
+    // Tick mark
+    ctx.strokeStyle = HEIGHT_CURVE_COLOR;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.moveTo(m.left - 4, py); ctx.lineTo(m.left, py); ctx.stroke();
+    // Label
+    ctx.fillText(Math.round(val), m.left - 6, py);
+  }
+  // Axis title
+  ctx.save();
+  ctx.fillStyle = HEIGHT_CURVE_COLOR;
+  ctx.font = '9px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.translate(10, m.top + plotH / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('cm', 0, 0);
+  ctx.restore();
+
+  // ── RIGHT Y-AXIS LABELS (weight, kg — only where ≥ 0) ───────
+  ctx.font = '9px sans-serif';
+  ctx.fillStyle = WEIGHT_CURVE_COLOR;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i <= majorCount; i++) {
+    const val = yMaxWt - i * wtMajor;
+    if (val < 0) continue; // don't label below 0 kg
+    const py = m.top + i * pxSq;
+    // Tick mark
+    ctx.strokeStyle = WEIGHT_CURVE_COLOR;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.moveTo(m.left + plotW, py); ctx.lineTo(m.left + plotW + 4, py); ctx.stroke();
+    // Label
+    ctx.fillText(Math.round(val), m.left + plotW + 6, py);
+  }
+  // Axis title
+  ctx.save();
+  ctx.fillStyle = WEIGHT_CURVE_COLOR;
+  ctx.font = '9px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.translate(actualCw - 10, m.top + plotH / 2);
+  ctx.rotate(Math.PI / 2);
+  ctx.fillText('kg', 0, 0);
+  ctx.restore();
+
+  // ── X-AXIS LABELS ────────────────────────────────────────────
+  ctx.font = '9px sans-serif';
+  ctx.fillStyle = '#444';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (const g of gridSpec.majorGrid) {
+    if (!g.label) continue;
+    if (g.age < ageMin - 0.01 || g.age > ageMax + 0.01) continue;
+    const gx = xPx(g.age);
+    ctx.fillText(g.label, gx, m.top + plotH + 4);
+  }
+  // Axis title
+  ctx.fillStyle = '#666';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('Age', m.left + plotW / 2, ch - 2);
+}
+
 // Draw both charts
 function renderBothCharts() {
   if (!chartState.htCentileCache) return;
@@ -1859,11 +2163,27 @@ function renderBothCharts() {
   const botMargins = getBottomPanelMargins(chartState.range);
   const wtCh = Math.round(wtPlotH + botMargins.top + botMargins.bottom);
 
-  // Draw both panels with their computed dimensions
-  drawSingleChart('htCanvas', 'height', '#003078', 'Height', cw, htCh, true);
-  drawSingleChart('wtCanvas', 'weight', '#8B1A1A', 'Weight', cw, wtCh, false);
-  setupTooltip('htCanvas');
-  setupTooltip('wtCanvas');
+  // Route to combined or separate renderer
+  const wtBlock = document.getElementById('wtBlock');
+  const useCombined = chartState.viewMode === 'combined' && chartState.range === '2-9';
+
+  if (chartState.viewMode === 'combined' && chartState.range !== '2-9') {
+    console.info('Combined view not yet implemented for range ' + chartState.range + ' — using Separate');
+  }
+
+  if (useCombined) {
+    // Combined view: single canvas with dual y-axes
+    drawCombinedChart('htCanvas', '2-9', cw);
+    if (wtBlock) wtBlock.style.display = 'none';
+    setupTooltip('htCanvas');
+  } else {
+    // Separate view: two stacked panels
+    drawSingleChart('htCanvas', 'height', '#003078', 'Height', cw, htCh, true);
+    drawSingleChart('wtCanvas', 'weight', '#8B1A1A', 'Weight', cw, wtCh, false);
+    if (wtBlock) wtBlock.style.display = '';
+    setupTooltip('htCanvas');
+    setupTooltip('wtCanvas');
+  }
 }
 
 // ============================================================
@@ -2273,6 +2593,7 @@ function saveState() {
       gestWeeks:  document.getElementById("gestWeeks").value,
       gestDays:   document.getElementById("gestDays").value,
       chartRange:   chartState.range,
+      viewMode:     chartState.viewMode,
       showPreterm:  chartState.showPreterm,
       rows
     };
@@ -2288,6 +2609,7 @@ function loadState() {
 
     // Restore chart state
     if (state.chartRange)  chartState.range       = state.chartRange;
+    if (state.viewMode === 'combined' || state.viewMode === 'separate') chartState.viewMode = state.viewMode;
     if (state.showPreterm !== undefined) chartState.showPreterm = state.showPreterm;
 
     // Sync range buttons
@@ -2298,6 +2620,11 @@ function loadState() {
     const rangeActiveId = { "preterm":"btnPretChart", "0-1":"btn01", "1-4":"btn14", "2-9":"btn29", "9-18":"btn918", "2-18":"btn218" }[chartState.range] || "btn218";
     const rangeActiveEl = document.getElementById(rangeActiveId);
     if (rangeActiveEl) rangeActiveEl.classList.add("active");
+    // Sync view mode buttons
+    const btnC = document.getElementById("btnCombined");
+    const btnS = document.getElementById("btnSeparate");
+    if (btnC) btnC.classList.toggle("active", chartState.viewMode === "combined");
+    if (btnS) btnS.classList.toggle("active", chartState.viewMode === "separate");
     // Restore preterm toggle visibility and state
     const pretSepR   = document.getElementById("pretSep");
     const pretGroupR = document.getElementById("pretGroup");
@@ -2363,6 +2690,7 @@ function newPatient() {
   chartState.wtMeasurements  = [];
   chartState.sex             = "male";
   chartState.range           = "0-1";
+  chartState.viewMode        = "combined";
 
   // 2. Clear canvases explicitly
   ["htCanvas", "wtCanvas"].forEach(id => {
@@ -2403,6 +2731,11 @@ function newPatient() {
   // 0-1y is default on new patient so show the toggle
   if (pretSepNP)   pretSepNP.style.display   = "";
   if (pretGroupNP) pretGroupNP.style.display = "";
+  // Reset view mode buttons
+  const npBtnC = document.getElementById("btnCombined");
+  const npBtnS = document.getElementById("btnSeparate");
+  if (npBtnC) npBtnC.classList.add("active");
+  if (npBtnS) npBtnS.classList.remove("active");
   // 7. Show empty state, hide charts
   document.getElementById("emptyState").style.display = "block";
   document.getElementById("chartsContainer").style.display = "none";
