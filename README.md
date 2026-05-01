@@ -45,6 +45,7 @@ For Claude Code integration, see `CLAUDE.md`.
 
 | Version | Summary |
 |---|---|
+| v2.0-phase1 | Combined view (2–9y): single canvas, dual y-axes, shared gridlines, zoom removed |
 | v1.9 | MIN_PX_PER_SQUARE trim, crossfade range transitions, top-panel age labels |
 | v1.8 | Dedicated preterm chart, 0-2w double-line fix, birth centile markers |
 | v1.7 | Paper-chart cosmetic redesign (sex-specific centile colours, dotted gridlines, system fonts) |
