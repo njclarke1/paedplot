@@ -663,15 +663,6 @@
         <div class="ctrl-group" id="pretGroup" style="display:none">
           <button class="ctrl-btn" id="btnPreterm" onclick="togglePreterm()">+ Preterm</button>
         </div>
-        <div class="ctrl-sep"></div>
-        <div class="ctrl-group">
-          <button class="ctrl-btn active" id="btnFull" onclick="setZoomMode('full')">Full</button>
-          <button class="ctrl-btn" id="btnZoom" onclick="setZoomMode('zoom')">Zoom</button>
-        </div>
-        <div class="ctrl-sep"></div>
-        <div id="panIndicator" style="font-size:0.72rem;color:var(--muted);display:none">
-          ← drag to pan →
-        </div>
       </div>
 
       <!-- Stacked charts -->
@@ -984,9 +975,6 @@ let chartState = {
   sex: 'male',
   range: '0-1',        // '0-1' | '1-4' | '2-9' | '9-18' | '2-18'
   showPreterm: false,  // whether to show preterm section on 0-1y chart
-  zoomMode: 'full',    // 'full' | 'zoom'
-  panCentre: 1.0,      // decimal age at centre of zoom window (3y wide)
-  zoomWindow: 1.0,     // years — overridden per range by ZOOM_WINDOWS lookup
   htMeasurements: [],
   wtMeasurements: [],
   gestWeeks: 40,
@@ -1095,32 +1083,8 @@ function getRangeLimits() {
   }
 }
 
-// Get visible age window (full or zoomed)
-// Clinically meaningful zoom windows per range
-// These reflect appropriate surveillance/assessment intervals for each age band
-const ZOOM_WINDOWS = {
-  '0-1':  4  / 12,   // 4 months  — one infant surveillance interval
-  '1-4':  12 / 12,   // 12 months — one year of toddler/pre-school growth
-  '2-9':  2.0,       // 2 years   — one school year either side
-  '9-18': 3.0,       // 3 years   — pubertal assessment window
-  '2-18': 4.0,       // 4 years   — broad adolescent overview
-};
-
-function applyZoomWindow() {
-  chartState.zoomWindow = ZOOM_WINDOWS[chartState.range] || 3.0;
-}
-
 function getVisibleWindow() {
-  const limits = getRangeLimits();
-  if (chartState.zoomMode === 'full') {
-    return { ageMin: limits.ageMin, ageMax: limits.ageMax };
-  } else {
-    const half = chartState.zoomWindow / 2;
-    let centre = chartState.panCentre;
-    // Clamp so window doesn't go outside range limits
-    centre = Math.max(limits.ageMin + half, Math.min(limits.ageMax - half, centre));
-    return { ageMin: centre - half, ageMax: centre + half };
-  }
+  return getRangeLimits();
 }
 
 // Compute Y range from centile data visible in age window, plus any data points.
@@ -1351,7 +1315,7 @@ function drawSingleChart(canvasId, measurementMethod, color, title, cw, ch, isTo
   // GRID LINES — full-height vertical lines, clipped to plot area.
   // Paper-chart style: fine dotted light-grey (#D3D3D3 with setLineDash([1,4])).
   // Major lines slightly denser dash pattern for subtle hierarchy.
-  const gridSpec = getGridSpec(chartState.range, chartState.zoomMode);
+  const gridSpec = getGridSpec(chartState.range);
 
   // Minor grid lines
   ctx.strokeStyle = '#D3D3D3';
@@ -1511,7 +1475,7 @@ function drawSingleChart(canvasId, measurementMethod, color, title, cw, ch, isTo
   // top (height) panel gets a minimal age strip at the top margin so at
   // least one set of age labels is always visible when scrolling tall charts.
   if (!isTopPanel) {
-    const gridSpec2 = getGridSpec(chartState.range, chartState.zoomMode);
+    const gridSpec2 = getGridSpec(chartState.range);
 
     ctx.font = '9px sans-serif';
     ctx.textBaseline = 'top';
@@ -1566,7 +1530,7 @@ function drawSingleChart(canvasId, measurementMethod, color, title, cw, ch, isTo
   // These sit inside the 20px top margin, rendered small and muted so they
   // don't compete with the chart content. Only major labels (no minor ticks).
   if (isTopPanel) {
-    const gridSpec2 = getGridSpec(chartState.range, chartState.zoomMode);
+    const gridSpec2 = getGridSpec(chartState.range);
     ctx.font = '8px sans-serif';
     ctx.fillStyle = '#999';
     ctx.textAlign = 'center';
@@ -1667,7 +1631,7 @@ function weekLabel(weeks) {
   return `${weeks}`;
 }
 
-function getGridSpec(range, zoomMode) {
+function getGridSpec(range) {
   switch (range) {
     case 'preterm': {
       // Dedicated preterm chart: 23w → 42w gestation.
@@ -1898,8 +1862,6 @@ function renderBothCharts() {
   // Draw both panels with their computed dimensions
   drawSingleChart('htCanvas', 'height', '#003078', 'Height', cw, htCh, true);
   drawSingleChart('wtCanvas', 'weight', '#8B1A1A', 'Weight', cw, wtCh, false);
-  setupPanHandlers('htCanvas');
-  setupPanHandlers('wtCanvas');
   setupTooltip('htCanvas');
   setupTooltip('wtCanvas');
 }
@@ -1919,7 +1881,6 @@ function togglePreterm() {
   // need to re-check chartState.range or to reset showPreterm here — clicking
   // this button always happens on 0-1y. v1.5.3: removed stale copy-paste
   // logic that referenced an undefined `range` identifier.
-  if (chartState.zoomMode === 'zoom') { applyZoomWindow(); recenterPan(); }
   renderBothCharts();
   saveState();
 }
@@ -1944,8 +1905,6 @@ function setChartRange(range) {
     const btn = document.getElementById('btnPreterm');
     if (btn) { btn.classList.remove('active'); btn.textContent = '+ Preterm'; }
   }
-  if (chartState.zoomMode === 'zoom') { applyZoomWindow(); recenterPan(); }
-
   // Smooth crossfade: fade out → re-render → fade in
   const stack = document.getElementById('chartsStack');
   if (stack) {
@@ -1958,124 +1917,6 @@ function setChartRange(range) {
     renderBothCharts();
   }
   saveState();
-}
-
-function setZoomMode(mode) {
-  chartState.zoomMode = mode;
-  document.getElementById('btnFull').classList.toggle('active', mode === 'full');
-  document.getElementById('btnZoom').classList.toggle('active', mode === 'zoom');
-  document.getElementById('panIndicator').style.display = mode === 'zoom' ? 'block' : 'none';
-  if (mode === 'zoom') { applyZoomWindow(); recenterPan(); }
-  renderBothCharts();
-  saveState();
-}
-
-function recenterPan() {
-  // Centre on most recent measurement within current range limits
-  const limits = getRangeLimits();
-  const allMeasurements = [...chartState.htMeasurements, ...chartState.wtMeasurements];
-  const inRange = allMeasurements.filter(m =>
-    m.corrAge >= limits.ageMin && m.corrAge <= limits.ageMax);
-  if (inRange.length > 0) {
-    const latest = inRange.reduce((a, b) => b.corrAge > a.corrAge ? b : a);
-    chartState.panCentre = latest.corrAge;
-  } else {
-    // Fallback: centre of range
-    chartState.panCentre = (limits.ageMin + limits.ageMax) / 2;
-  }
-}
-
-// ============================================================
-// PAN HANDLING — touch drag + mouse drag
-// ============================================================
-function setupPanHandlers(canvasId) {
-  const canvas = document.getElementById(canvasId);
-  let dragStartX = null;
-  let dragStartY = null;
-  let dragStartCentre = null;
-  let gestureAxis = null; // 'horizontal' | 'vertical' | null (undecided)
-
-  function onDragStart(clientX, clientY) {
-    if (chartState.zoomMode !== 'zoom') return;
-    dragStartX = clientX;
-    dragStartY = clientY;
-    dragStartCentre = chartState.panCentre;
-    gestureAxis = null; // reset — we don't know direction yet
-  }
-
-  function onDragMove(clientX, clientY, event) {
-    if (dragStartX === null || chartState.zoomMode !== 'zoom') return;
-
-    const dx = Math.abs(clientX - dragStartX);
-    const dy = Math.abs(clientY - dragStartY);
-
-    // Determine gesture axis on first significant movement (>4px threshold)
-    if (gestureAxis === null) {
-      if (dx < 4 && dy < 4) return; // not enough movement yet — don't decide
-      gestureAxis = dx >= dy ? 'horizontal' : 'vertical';
-    }
-
-    // Only handle horizontal gestures — vertical ones are page scroll
-    if (gestureAxis !== 'horizontal') return;
-
-    // Scroll separation is handled by CSS touch-action: pan-y on the container
-
-    const T = canvas._transform;
-    if (!T) return;
-    const dxPixels = clientX - dragStartX;
-    const agePerPixel = (canvas._ageMax - canvas._ageMin) / T.plotW;
-    const ageDelta = -dxPixels * agePerPixel;
-    chartState.panCentre = dragStartCentre + ageDelta;
-    renderBothCharts();
-  }
-
-  function onDragEnd() {
-    if (dragStartX !== null && gestureAxis === 'horizontal') {
-      saveState();
-    }
-    dragStartX = null;
-    dragStartY = null;
-    dragStartCentre = null;
-    gestureAxis = null;
-  }
-
-  // Attach pan/drag listeners only once per canvas
-  if (!canvas._panListenersAttached) {
-    canvas._panListenersAttached = true;
-
-    // Mouse (desktop) — horizontal drag only
-    canvas.addEventListener('mousedown', e => {
-      onDragStart(e.clientX, e.clientY);
-      e.preventDefault();
-    });
-    window.addEventListener('mousemove', e => {
-      if (dragStartX !== null) onDragMove(e.clientX, e.clientY, null);
-    });
-    window.addEventListener('mouseup', onDragEnd);
-
-    // Touch — direction-aware: horizontal = pan chart, vertical = scroll page
-    // touchstart must be passive (can't call preventDefault here)
-    canvas.addEventListener('touchstart', e => {
-      if (e.touches.length === 1) {
-        onDragStart(e.touches[0].clientX, e.touches[0].clientY);
-      }
-    }, { passive: true });
-
-    // touchmove — passive: true so browser scroll is never blocked.
-    // Horizontal pan is handled by the direction check in onDragMove;
-    // vertical scroll is guaranteed by touch-action: pan-y on the container.
-    canvas.addEventListener('touchmove', e => {
-      if (e.touches.length === 1) {
-        onDragMove(e.touches[0].clientX, e.touches[0].clientY, null);
-      }
-    }, { passive: true });
-
-    canvas.addEventListener('touchend', onDragEnd);
-    canvas.addEventListener('touchcancel', onDragEnd);
-  }
-
-  // Re-setup tooltip on the new node
-  setupTooltip(canvasId);
 }
 
 // ============================================================
@@ -2123,7 +1964,7 @@ function setupTooltip(canvasId) {
       const my = e.clientY - rect.top;
       if (!showTip(mx, my, e.clientX, e.clientY)) {
         tooltip.style.display = 'none';
-        canvas.style.cursor = chartState.zoomMode === 'zoom' ? 'grab' : 'crosshair';
+        canvas.style.cursor = 'crosshair';
       } else {
         canvas.style.cursor = 'pointer';
       }
@@ -2340,9 +2181,6 @@ function plotCharts() {
     if (activeEl) activeEl.classList.add('active');
   }
 
-  // If zoom mode active, recentre
-  if (chartState.zoomMode === 'zoom') { applyZoomWindow(); recenterPan(); }
-
   document.getElementById('emptyState').style.display = 'none';
   document.getElementById('chartsContainer').style.display = 'block';
 
@@ -2435,8 +2273,6 @@ function saveState() {
       gestWeeks:  document.getElementById("gestWeeks").value,
       gestDays:   document.getElementById("gestDays").value,
       chartRange:   chartState.range,
-      chartZoom:    chartState.zoomMode,
-      panCentre:    chartState.panCentre,
       showPreterm:  chartState.showPreterm,
       rows
     };
@@ -2453,13 +2289,7 @@ function loadState() {
     // Restore chart state
     if (state.chartRange)  chartState.range       = state.chartRange;
     if (state.showPreterm !== undefined) chartState.showPreterm = state.showPreterm;
-    if (state.chartZoom)  chartState.zoomMode = state.chartZoom;
-    if (state.panCentre != null) chartState.panCentre = state.panCentre;
 
-    // Sync range/zoom toggle buttons to restored state
-    const btnFull = document.getElementById("btnFull");
-    const btnZoom = document.getElementById("btnZoom");
-    const panInd  = document.getElementById("panIndicator");
     // Sync range buttons
     ["btnPretChart","btn01","btn14","btn29","btn918","btn218"].forEach(id => {
       const el = document.getElementById(id);
@@ -2468,11 +2298,6 @@ function loadState() {
     const rangeActiveId = { "preterm":"btnPretChart", "0-1":"btn01", "1-4":"btn14", "2-9":"btn29", "9-18":"btn918", "2-18":"btn218" }[chartState.range] || "btn218";
     const rangeActiveEl = document.getElementById(rangeActiveId);
     if (rangeActiveEl) rangeActiveEl.classList.add("active");
-    if (btnFull && btnZoom) {
-      btnFull.classList.toggle("active", chartState.zoomMode === "full");
-      btnZoom.classList.toggle("active", chartState.zoomMode === "zoom");
-    }
-    if (panInd) panInd.style.display = chartState.zoomMode === "zoom" ? "block" : "none";
     // Restore preterm toggle visibility and state
     const pretSepR   = document.getElementById("pretSep");
     const pretGroupR = document.getElementById("pretGroup");
@@ -2538,8 +2363,6 @@ function newPatient() {
   chartState.wtMeasurements  = [];
   chartState.sex             = "male";
   chartState.range           = "0-1";
-  chartState.zoomMode        = "full";
-  chartState.panCentre       = 1.0;
 
   // 2. Clear canvases explicitly
   ["htCanvas", "wtCanvas"].forEach(id => {
@@ -2548,7 +2371,6 @@ function newPatient() {
       const ctx = c.getContext("2d");
       ctx.clearRect(0, 0, c.width, c.height);
       c._hitAreas = [];
-      c._panListenersAttached = false;
     }
   });
 
@@ -2581,10 +2403,6 @@ function newPatient() {
   // 0-1y is default on new patient so show the toggle
   if (pretSepNP)   pretSepNP.style.display   = "";
   if (pretGroupNP) pretGroupNP.style.display = "";
-  document.getElementById("btnFull").classList.add("active");
-  document.getElementById("btnZoom").classList.remove("active");
-  document.getElementById("panIndicator").style.display = "none";
-
   // 7. Show empty state, hide charts
   document.getElementById("emptyState").style.display = "block";
   document.getElementById("chartsContainer").style.display = "none";
@@ -2666,7 +2484,6 @@ function runTests() {
       const id = row.id.replace('row-', '');
       return (document.getElementById(`mwt-${id}`)?.value || document.getElementById(`mht-${id}`)?.value);
     });
-    applyZoomWindow(); // recalculate zoom window for restored range
     if (dob && hasValue) plotCharts();
   }
 })();
