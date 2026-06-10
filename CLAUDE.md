@@ -8,9 +8,9 @@ PaedPlot is a fully offline, single-file HTML tool for plotting UK-WHO paediatri
 
 ## Current state
 
-**Version:** v1.9 (April 2026)
-**Working file:** `src/paedplot.html` (~205KB, ~2700 lines)
-**Validation status:** SDS calculation engine validated against live RCPCH Digital Growth Charts API to ±0.001 SDS across all datasets, boundaries, and extremes (April 2026). See `docs/VALIDATION_RECORD.md`.
+**Version:** v2.1 (June 2026)
+**Working file:** `src/paedplot.html` (~298KB, ~3270 lines — includes ~90KB embedded Hind WOFF2 font)
+**Validation status:** SDS calculation engine validated against live RCPCH Digital Growth Charts API to ±0.001 SDS across all datasets, boundaries, and extremes (April 2026). See `docs/VALIDATION_RECORD.md`. June 2026 audit confirmed the engine and LMS data are byte-identical to the validated v1.9 build.
 
 ## Architecture overview
 
@@ -18,34 +18,35 @@ PaedPlot is a fully offline, single-file HTML tool for plotting UK-WHO paediatri
 
 ```
 paedplot.html
-├── <style>           lines 7-530       CSS (~530 lines)
-├── <body>            lines 531-730     HTML structure
-├── <script id="lms-data">              LMS JSON (~105KB, single line)
-└── <script>          lines 732-2692    JavaScript (~1960 lines)
+├── <style>           lines 7-604       CSS incl. 3 @font-face Hind embeds (w300/400/600)
+├── <body>            lines 606-775     HTML structure
+├── <script id="lms-data">  line 776    LMS JSON (~105KB, single line)
+└── <script>          lines 780-3265    JavaScript (~2480 lines)
 ```
 
-### JavaScript organisation (top to bottom)
+### JavaScript organisation (top to bottom; line numbers as of v2.1)
 
 | Section | Lines | Purpose |
 |---|---|---|
-| LMS data parsing | 733 | Parse embedded JSON |
-| Math engine | 738-930 | normalCDF, calcDecimalAge, calcCorrectedAge, selectDataset, lagrange4, lookupLMS, sdsFromMeasurement, centileFromSDS, centileBandText, calculateMeasurement, generateCentileLines |
-| Formatting | 956-980 | formatAge, formatAgeVerbose |
-| Chart state | 983-1000 | `chartState` object — all mutable UI state |
-| Layout constants | 1003-1035 | Margins, GRID table, MIN/MAX_PX_PER_SQUARE |
-| Y-axis spec | 1047-1065 | Y_GRID_SPEC, getYGridSpec, getYSnapUnit |
-| Geometry helpers | 1067-1185 | getCanvasWidth, makeTransform, getRangeLimits, computeYRange |
-| Drawing engine | 1188-1640 | `drawSingleChart` — the main rendering function (~450 lines) |
-| Grid spec | 1644-1805 | ageLabel, halfYearLabel, weekLabel, getGridSpec (x-axis definitions per range) |
-| Panel orchestration | 1810-1905 | `renderBothCharts` — computes sizing, calls drawSingleChart twice |
-| Range/zoom controls | 1910-1990 | togglePreterm, setChartRange, setZoomMode, recenterPan |
-| Interaction handlers | 1991-2150 | setupPanHandlers, setupTooltip |
-| Form/data entry | 2152-2260 | addMeasurementRow, getMeasurements, updateGhostValues |
-| Plot orchestration | 2264-2405 | plotCharts (main entry point), updateLegend, renderResults |
-| State persistence | 2421-2530 | saveState, loadState, clearState, attachSaveListeners |
-| Patient management | 2531-2610 | newPatient |
-| Dev tools | 2612-2690 | openDevModal, runTests |
-| Init | 2692 | IIFE that bootstraps everything |
+| LMS data parsing | 786 | Parse embedded JSON |
+| Math engine | 791-1009 | normalCDF, calcDecimalAge, calcCorrectedAge, selectDataset, lagrange4, lookupLMS, sdsFromMeasurement, measurementFromSDS, centileFromSDS, centileBandText, calculateMeasurement, generateCentileLines (+ getAccentColor/applySexTheme at 933-950) |
+| Formatting | 1014-1038 | formatAge, formatAgeVerbose |
+| Chart state | 1041 | `chartState` object — all mutable UI state |
+| Layout constants | 1059-1110 | Margins, GRID table, MIN/MAX_PX_PER_SQUARE, Y_GRID_SPEC |
+| Geometry helpers | 1112-1218 | getYSnapUnit, getCanvasWidth, makeTransform, getRangeLimits, computeYRange |
+| Separate-view renderer | 1220-1693 | `drawSingleChart` — stacked-panel rendering (~470 lines) |
+| Grid spec | 1696-1859 | ageLabel, halfYearLabel, weekLabel, getGridSpec (x-axis definitions per range) |
+| View mode | 1861 | setViewMode (Combined/Separate toggle) |
+| Combined-view renderer | 1935-2400 | COMBINED_CHART_CONFIG + `drawCombinedChart` — single canvas, dual y-axes |
+| Panel orchestration | 2402-2515 | `renderBothCharts` — sizing, routes to combined or separate renderer |
+| Range controls | 2517-2575 | updatePretermToggleVisibility, togglePreterm, setChartRange |
+| Tooltip | 2577-2643 | setupTooltip (once-attached listeners, `canvas._hitAreas`) |
+| Form/data entry | 2645-2757 | addMeasurementRow, getMeasurements, updateGhostValues |
+| Plot orchestration | 2759-2894 | plotCharts (main entry; `preserveRange` arg skips auto-range on session restore), updateLegend, renderResults |
+| State persistence | 2911-3001 | saveState, loadState, clearState, attachSaveListeners |
+| Patient management | 3017+ | newPatient |
+| Dev tools | ~3090-3240 | TEST_CASES, loadSamplePatient (sample presets), openDevModal, runTests |
+| Init | ~3230 | IIFE bootstrap + debounced resize handler |
 
 ### Key data structures
 
@@ -54,16 +55,16 @@ paedplot.html
 {
   sex: 'male'|'female',
   range: 'preterm'|'0-1'|'1-4'|'2-9'|'9-18'|'2-18',
-  zoomMode: 'full'|'zoom',
   showPreterm: boolean,
+  viewMode: 'combined'|'separate',   // v2.0 — default 'combined'
+  gestWeeks: number, gestDays: number,
   htCentileCache: { datasetName: [{age, vals[9]}] },
   wtCentileCache: same structure,
-  htMeasurements: [{date, value, chronAge, corrAge, sds, centile, centileText}],
-  wtMeasurements: same structure,
-  panOffsetX: number,
-  zoomCentreAge: number
+  htMeasurements: [{date, value, chronAge, corrAge, htResult, wtResult, ...}],
+  wtMeasurements: same structure
 }
 ```
+(zoomMode/panOffsetX/zoomCentreAge were removed with the zoom/pan system in v2.0 step 1A.)
 
 **`GRID`** — panel sizing geometry per range:
 ```javascript
@@ -77,7 +78,9 @@ paedplot.html
 }
 ```
 
-One grid square = `pxPerSquare × pxPerSquare` pixels, always truly square. Panel width = `xSquares × pxPerSquare`. Panel height = `ySquares × pxPerSquare`. pxPerSquare is clamped to [10, 32] and derived from fitting the chart to container width.
+One grid square = `pxPerSquare × pxPerSquare` pixels, always truly square. Panel width = `xSquares × pxPerSquare`. Panel height = `ySquares × pxPerSquare`. pxPerSquare is clamped to [10, 32] in the separate view and derived from fitting the chart to container width. (The combined view has no MAX cap — it fills the width and grows taller.)
+
+**`COMBINED_CHART_CONFIG`** — per-range geometry for the combined (dual-axis) view: `ageMin/ageMax` (with `_F` girl overrides: girls 2–8y / 8–18y), `HT_ANCHOR`/`WT_ANCHOR` (this cm == this kg at the same y-pixel), `STEP_HT`/`WT_MAJOR` (cm and kg per grid square → independent y-scales `pxPerCm = pxSq/STEP_HT`, `pxPerKg = pxSq/WT_MAJOR`), `STEP_WT`/`LABEL_HT_STEP` (label intervals), and `LEFT/RIGHT_WT_MAX` / `LEFT/RIGHT_HT_MIN` dual-axis label cutoffs. Preterm and 2–18y ranges have no config → always render in separate view. Full field reference lives in the combined-chart comment block in the source (~line 1880).
 
 **`Y_GRID_SPEC`** — y-axis gridline intervals (independent from GRID):
 ```javascript
@@ -113,7 +116,8 @@ One grid square = `pxPerSquare × pxPerSquare` pixels, always truly square. Pane
 - Dashed `[4,4]`: 0.4th, 9th, 50th, 91st, 99.6th
 - Solid: 2nd, 25th, 75th, 98th
 - All same colour and weight (1.2px). 50th is NOT emphasised.
-- Colour: sex-specific accent — `#68A1C5` (boys), `#C16B86` (girls)
+- Colour: sex-specific accent — `#0081c7` (boys), `#e7459a` (girls) — v2.1 palette; both height and weight centile sets use the accent in the combined view too
+- Centile labels (suffix-stripped, e.g. "50") drawn on the line at both left and right plot edges with a white halo; 'height'/'weight' watermark at 25% alpha on the 50th centile
 
 ### Axis gridline model (v1.5.5 / v1.6)
 
@@ -122,7 +126,7 @@ Three independent tiers per axis:
 - `majorGrid`: gridline + tick mark + label
 - `pipOnly`: tick + label on axis strip only (no gridline through plot)
 
-Defined by `getGridSpec(range, zoomMode)` for x-axis and `Y_GRID_SPEC` for y-axis.
+Defined by `getGridSpec(range)` for x-axis and `Y_GRID_SPEC` for y-axis.
 
 0-1y x-axis uses clinical vernacular: gestational weeks on preterm side (24, 26, 28, 30, 32, 34, 36), postnatal weeks (2, 4, 6, 8, 10), then months from 3m onward (3m, 4m, ..., 11m, 1y). Birth pivot at 40w gestation.
 
@@ -130,15 +134,19 @@ Defined by `getGridSpec(range, zoomMode)` for x-axis and `Y_GRID_SPEC` for y-axi
 
 - Definition: `gestWeeks < 37` — applied at FOUR sites: `calcCorrectedAge`, `drawSingleChart`, `updateLegend`, `renderResults`. If modifying threshold, update ALL FOUR.
 - Correction formula: `correction = (40 - gestWeeks - gestDays/7) / 52.18` years, subtracted from decimal age.
-- Dedicated preterm chart (6th range button): 23w-42w gestation, only `uk90_preterm` data.
-- 0-1y preterm toggle: extends left to -0.33y; `uk90_preterm` lines drawn up to age 0 only.
+- Dedicated preterm chart (6th range button): 23w-42w gestation, only `uk90_preterm` data. **Separate view only** — no COMBINED_CHART_CONFIG entry.
+- 0-1y preterm toggle: extends left to -0.33y; `uk90_preterm` lines drawn up to age 0 only. **Only works in separate view** — combined 0-1y pins ageMin at 0, so the toggle is hidden in combined view (`updatePretermToggleVisibility`).
 - Auto-range: preterm view auto-activates when earliest measurement corrected age ≤ 2w post-term.
+- Dot semantics differ between views: separate view plots ● at chronological age + ✕ at corrected age (joined by a dashed line) for preterm patients; combined view plots a single dot at corrected age.
+- UK90 has no length/height reference below 25w gestation — `lookupLMS` correctly returns null for length of a 23-24w baby (weight works from 23w).
 
 ### Sex-theme system
 
-CSS custom property `--accent` defaults to boys blue (`#68A1C5`). `body.sex-girls` class overrides to rose (`#C16B86`). JS helper `applySexTheme(sex)` toggles the class. Called on init, sex-radio change, state restore, and every render.
+CSS custom property `--accent` defaults to boys blue (`#0081c7`). `body.sex-girls` class overrides to pink (`#e7459a`). JS helper `applySexTheme(sex)` toggles the class AND updates the 2–9y/9–18y button labels (girls: "2–8y"/"8–18y"). Called on init, sex-radio change, state restore, newPatient, and every render.
 
-Canvas centile line colour uses `getAccentColor(sex)` (reads JS constants, not CSS vars — canvas has no cascade).
+Canvas centile line colour uses `getAccentColor(sex)` (reads JS constants `ACCENT_BOYS`/`ACCENT_GIRLS`, not CSS vars — canvas has no cascade). Measurement dot colours: height `#81c320` boys / `#9dc955` girls, weight `#c32081` boys / `#559dc9` girls (matched in the legend).
+
+Typography: Hind, embedded as three base64 WOFF2 @font-face blocks (weights 300/400/600) — fully offline. Note canvas code requests `bold` (700), which the browser resolves to the 600 face.
 
 ## Coding conventions
 
@@ -160,28 +168,28 @@ paedplot/
 ├── README.md                     (project README)
 ├── .gitignore
 ├── src/
-│   └── paedplot.html             (v1.9 — the working app)
+│   └── paedplot.html             (v2.1 — the working app)
 ├── docs/
-│   ├── paedplot_opus_briefing.md (handoff briefing — architecture, settled decisions)
-│   ├── paedplot_explainer.md     (technical explainer — data, algorithms, version history)
-│   ├── CODEBASE_REFERENCE.md     (line-number codebase map for token-efficient lookup)
+│   ├── paedplot_opus_briefing.md (handoff briefing — STALE, describes v1.x)
+│   ├── paedplot_explainer.md     (technical explainer — STALE, describes v1.x)
+│   ├── CODEBASE_REFERENCE.md     (line-number codebase map — STALE, v1.9 line numbers)
 │   └── VALIDATION_RECORD.md      (RCPCH API validation audit trail)
 ├── validation/
-│   └── validate_paedplot.sh      (Termux script for RCPCH API cross-check)
+│   ├── validate_paedplot.sh      (Termux/bash script — needs curl+jq, hardcoded v1.5.4 values)
+│   └── validate_paedplot.mjs     (Node ≥18 — no deps, computes PaedPlot SDS live from src; preferred)
 └── versions/                     (version snapshots — do not modify)
-    ├── paedplot_v1.5.html
-    ├── paedplot_v1.5.1.html
-    ├── paedplot_v1.5.2.html
-    ├── paedplot_v1.5.3.html
-    ├── paedplot_v1.5.4.html
-    ├── paedplot_v1.5.5.html
-    ├── paedplot_v1.6.html
-    ├── paedplot_v1.7.html
-    ├── paedplot_v1.8.html
-    └── paedplot_v1.9.html
+    ├── paedplot_v1.5.html … paedplot_v1.9.html   (v1.5, v1.5.1-v1.5.5, v1.6-v1.9)
+    ├── paedplot_v2.0-phase1.html
+    ├── paedplot_v2.0-phase2.html
+    ├── paedplot_v2.0-design.html
+    └── paedplot_v2.1.html
 ```
 
 ## v2.0 roadmap — unified single-canvas chart
+
+### Status (June 2026)
+
+Phases 1-2 **done** (combined renderer for 0-1y/1-4y/2-9y/9-18y; preterm and 2-18y stay separate-only). Phase 3 **partial** (tooltip + measurement dots work in combined view; no pinch-to-zoom — zoom/pan was removed entirely in step 1A). Phase 4 **mostly done** (Combined/Separate toggle, persistence, sex theme; print layout still stale). Phases 5-6 not started. Next planned UI change: replace Combined/Separate with a three-way Combined | Weight | Height selector.
 
 ### Goal
 
@@ -210,7 +218,7 @@ Replace the current two-stacked-canvas model (height panel above, weight panel b
 
 ### What MUST NOT change in v2.0
 
-- The calculation engine (lines 738-930) — validated, do not touch
+- The calculation engine (lines 791-1009) — validated, do not touch
 - The embedded LMS data — validated, do not touch
 - The centile line set (9 lines, specific SDS values, specific dash patterns)
 - Dataset boundary rules (2y, 4y truncation)
@@ -223,12 +231,15 @@ Replace the current two-stacked-canvas model (height panel above, weight panel b
 - X-axis label collisions on very small screens (not addressed)
 - Y-axis labels occasionally cut off at extremes
 - OFC: LMS data embedded but no chart panel built
-- Print layout: basic `@media print`, not optimised for A4 landscape
-- Horizontal scroll on 1-4y full mode on narrow phones (acceptable trade-off)
-- The zoom mode (Full/Zoom toggle) is clunky — planned replacement with pinch-to-zoom in v2.0
+- Print layout: STALE — `@media print` rules target classes removed in v2.0 (`.chart-panel`, `.chart-tabs`, `.chart-title`, `.print-header`), hides the results panel, and does not hide `.chart-controls`. Needs a dedicated pass.
+- Horizontal scroll on 1-4y separate view on narrow phones (acceptable trade-off)
+- Combined view can grow very tall on wide screens (no MAX pxPerSquare cap — by design, vertical scrolling expected)
+- Combined view plots preterm measurements at corrected age only (no ✕/chronological-dot pair as in separate view) — but the legend still shows "✕ Corrected age" for preterm patients
+- `docs/` briefing, explainer, and CODEBASE_REFERENCE still describe v1.9 — pending a refresh
 
 ## Testing
 
 - Syntax check: `node --check` on extracted JS after every edit
-- RCPCH API validation: `validation/validate_paedplot.sh` (requires curl, jq, RCPCH API key in env)
+- RCPCH API validation: `node validation/validate_paedplot.mjs` (Node ≥18, RCPCH_API_KEY in env; computes PaedPlot SDS live from src). Legacy: `validation/validate_paedplot.sh` (Termux, curl+jq, hardcoded v1.5.4 expected values).
+- In-app: Dev modal → runTests (7 sanity cases) + sample patient presets for every range/sex + preterm
 - Manual on-device testing on Pixel 9 Pro Fold (primary test device)

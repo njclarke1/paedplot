@@ -735,7 +735,7 @@
 
       <!-- Print footer -->
       <div class="print-footer">
-        PaedPlot v1.0 — Growth chart reference aid — Not a medical device — Calculations based on UK–WHO reference data (Cole et al.) — Not for permanent clinical record
+        PaedPlot v2.1 — Growth chart reference aid — Not a medical device — Calculations based on UK–WHO reference data (Cole et al.) — Not for permanent clinical record
       </div>
     </div>
   </div>
@@ -1217,7 +1217,7 @@ function computeYRange(centileData, measurements, ageMin, ageMax, isTopPanel, gr
   };
 }
 
-function drawSingleChart(canvasId, measurementMethod, color, title, cw, ch, isTopPanel) {
+function drawSingleChart(canvasId, measurementMethod, color, cw, ch, isTopPanel) {
   const canvas = document.getElementById(canvasId);
   const sex = chartState.sex;
   const { ageMin, ageMax } = getVisibleWindow();
@@ -1285,6 +1285,11 @@ function drawSingleChart(canvasId, measurementMethod, color, title, cw, ch, isTo
   const TWO_WEEKS = 2 / 52.18;
   const isPretermView = chartState.range === 'preterm';
   const isZeroToOneView = chartState.range === '0-1';
+
+  // View-filtered centile data — built once, shared by the line drawing here
+  // AND the edge labels at the end of this function, so labels never take
+  // their position from hidden datasets or clipped points.
+  const viewCentileData = {};
   for (const [ds, pts] of Object.entries(centileData)) {
     // Dataset-level view filter
     if (isPretermView && ds !== 'uk90_preterm') continue;
@@ -1301,7 +1306,10 @@ function drawSingleChart(canvasId, measurementMethod, color, title, cw, ch, isTo
     if (isZeroToOneView && ds === 'uk90_preterm') {
       viewFiltered = pts.filter(p => p.age <= 0 + 1e-9);
     }
+    viewCentileData[ds] = viewFiltered;
+  }
 
+  for (const [ds, viewFiltered] of Object.entries(viewCentileData)) {
     const inRange = viewFiltered.filter(p => p.age >= ageMin - 0.02 && p.age <= ageMax + 0.02);
     if (inRange.length < 2) continue;
     for (let ci = 0; ci < CENTILE_LINES.length; ci++) {
@@ -1631,7 +1639,7 @@ function drawSingleChart(canvasId, measurementMethod, color, title, cw, ch, isTo
   for (let ci = 0; ci < CENTILE_LINES.length; ci++) {
     const label = CENTILE_LINES[ci].label.replace(/(th|nd|st|rd)$/, '');
     let firstAge = Infinity, firstVal = null, lastAge = -Infinity, lastVal = null;
-    for (const [ds, pts] of Object.entries(centileData)) {
+    for (const pts of Object.values(viewCentileData)) {
       for (const pt of pts) {
         if (pt.age < ageMin - 0.05 || pt.age > ageMax + 0.05) continue;
         if (pt.age < firstAge) { firstAge = pt.age; firstVal = pt.vals[ci]; }
@@ -1675,14 +1683,6 @@ function getBestDatasetForAge(age) {
   if (age < 2.0)   return 'who_infant';
   if (age < 4.0)   return 'who_child';
   return 'uk90_child';
-}
-
-function pickStep(vmin, vmax, targetTicks, candidates) {
-  const range = vmax - vmin;
-  for (const c of candidates) {
-    if (range / c <= targetTicks) return c;
-  }
-  return candidates[candidates.length - 1];
 }
 
 // ============================================================
@@ -1864,6 +1864,7 @@ function setViewMode(mode) {
   const btnS = document.getElementById('btnSeparate');
   if (btnC) btnC.classList.toggle('active', mode === 'combined');
   if (btnS) btnS.classList.toggle('active', mode === 'separate');
+  updatePretermToggleVisibility();
   renderBothCharts();
   saveState();
 }
@@ -1872,14 +1873,10 @@ function setViewMode(mode) {
 // COMBINED CHART RENDERER (v2.0 Phase 2 — 0-1y, 1-4y, 2-9y, 9-18y)
 // Single plotting area. Dual y-axes share pixel space via a
 // fixed anchor: HT_ANCHOR cm == WT_ANCHOR kg at the same row.
-// Both axes use the same px-per-unit ratio (pxSq / STEP_HT),
-// so 1 cm == 1 kg in screen pixels across all ranges.
-// Height centile lines: navy (#003078), left y-axis (cm).
-// Weight centile lines: burgundy (#8B1A1A), right y-axis (kg).
+// Independent y-scales: pxPerCm = pxSq / STEP_HT, pxPerKg = pxSq / WT_MAJOR.
+// Both height and weight centile lines use the sex accent colour
+// (getAccentColor) — height cm on the left axis, weight kg on the right.
 // ============================================================
-
-const HEIGHT_CURVE_COLOR = '#0081c7';
-const WEIGHT_CURVE_COLOR = '#0081c7';
 
 // ============================================================
 // COMBINED CHART CONFIGURATION
@@ -2098,9 +2095,12 @@ function drawCombinedChart(canvasId, range, cw) {
   const TWO_WEEKS = 2 / 52.18;
   const isZeroToOneView = range === '0-1';
 
-  function drawCentileSet(cache, colorHex, yFn) {
+  // View-filtered centile data — shared by line drawing and edge labels so
+  // labels never take their position from hidden datasets or clipped points.
+  // 0-1y: replicate paper-chart blank 0-2w region (same logic as drawSingleChart)
+  function filterForView(cache) {
+    const out = {};
     for (const [ds, pts] of Object.entries(cache)) {
-      // 0-1y: replicate paper-chart blank 0-2w region (same logic as drawSingleChart)
       if (isZeroToOneView && ds === 'uk90_preterm' && !chartState.showPreterm) continue;
       let viewPts = pts;
       if (isZeroToOneView && ds === 'who_infant') {
@@ -2109,7 +2109,16 @@ function drawCombinedChart(canvasId, range, cw) {
       if (isZeroToOneView && ds === 'uk90_preterm') {
         viewPts = pts.filter(p => p.age <= 0 + 1e-9);
       }
-      const inRange = viewPts.filter(p => p.age >= ageMin - 0.02 && p.age <= ageMax + 0.02);
+      out[ds] = viewPts;
+    }
+    return out;
+  }
+  const htView = filterForView(htCache);
+  const wtView = filterForView(wtCache);
+
+  function drawCentileSet(cache, colorHex, yFn) {
+    for (const pts of Object.values(cache)) {
+      const inRange = pts.filter(p => p.age >= ageMin - 0.02 && p.age <= ageMax + 0.02);
       if (inRange.length < 2) continue;
       for (let ci = 0; ci < CENTILE_LINES.length; ci++) {
         ctx.beginPath();
@@ -2127,8 +2136,8 @@ function drawCombinedChart(canvasId, range, cw) {
       ctx.setLineDash([]);
     }
   }
-  drawCentileSet(htCache, accentColor, htY);
-  drawCentileSet(wtCache, accentColor, wtY);
+  drawCentileSet(htView, accentColor, htY);
+  drawCentileSet(wtView, accentColor, wtY);
 
   // BIRTH CENTILE MARKERS for 0-1y — short horizontal ticks at age 0,
   // filling the blank 0-2w region. Drawn for both ht and wt bands.
@@ -2217,7 +2226,7 @@ function drawCombinedChart(canvasId, range, cw) {
   ctx.save();
   ctx.beginPath(); ctx.rect(m.left, m.top, plotW, plotH); ctx.clip();
   ctx.font = '10px Hind, sans-serif'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
-  for (const [labelCache, yFn] of [[htCache, htY], [wtCache, wtY]]) {
+  for (const [labelCache, yFn] of [[htView, htY], [wtView, wtY]]) {
     for (let ci = 0; ci < CENTILE_LINES.length; ci++) {
       const label = CENTILE_LINES[ci].label.replace(/(th|nd|st|rd)$/, '');
       let firstAge = Infinity, firstVal = null, lastAge = -Infinity, lastVal = null;
@@ -2491,8 +2500,8 @@ function renderBothCharts() {
     setupTooltip('htCanvas');
   } else {
     // Separate view: two stacked panels
-    drawSingleChart('htCanvas', 'height', chartState.sex === 'female' ? '#9dc955' : '#81c320', 'Height', cw, htCh, true);
-    drawSingleChart('wtCanvas', 'weight', chartState.sex === 'female' ? '#559dc9' : '#c32081', 'Weight', cw, wtCh, false);
+    drawSingleChart('htCanvas', 'height', chartState.sex === 'female' ? '#9dc955' : '#81c320', cw, htCh, true);
+    drawSingleChart('wtCanvas', 'weight', chartState.sex === 'female' ? '#559dc9' : '#c32081', cw, wtCh, false);
     if (wtBlock) wtBlock.style.display = '';
     setupTooltip('htCanvas');
     setupTooltip('wtCanvas');
@@ -2502,6 +2511,17 @@ function renderBothCharts() {
 // ============================================================
 // CHART CONTROLS: range toggle and zoom mode
 // ============================================================
+// The "+ Preterm" toggle only has an effect on the 0-1y SEPARATE view
+// (drawSingleChart extends the x-axis to -0.33y; drawCombinedChart pins
+// ageMin at 0 via COMBINED_CHART_CONFIG). Show it only where it works.
+function updatePretermToggleVisibility() {
+  const show = chartState.range === '0-1' && chartState.viewMode === 'separate';
+  const pretSep   = document.getElementById('pretSep');
+  const pretGroup = document.getElementById('pretGroup');
+  if (pretSep)   pretSep.style.display   = show ? '' : 'none';
+  if (pretGroup) pretGroup.style.display = show ? '' : 'none';
+}
+
 function togglePreterm() {
   chartState.showPreterm = !chartState.showPreterm;
   const btn = document.getElementById('btnPreterm');
@@ -2527,11 +2547,10 @@ function setChartRange(range) {
   const activeId = { 'preterm':'btnPretChart', '0-1':'btn01', '1-4':'btn14', '2-9':'btn29', '9-18':'btn918', '2-18':'btn218' }[range];
   const activeEl = document.getElementById(activeId);
   if (activeEl) activeEl.classList.add('active');
-  // Show preterm toggle only on 0-1y range (not on the dedicated preterm chart — everything is preterm there)
-  const pretSep   = document.getElementById('pretSep');
-  const pretGroup = document.getElementById('pretGroup');
-  if (pretSep)   pretSep.style.display   = range === '0-1' ? '' : 'none';
-  if (pretGroup) pretGroup.style.display = range === '0-1' ? '' : 'none';
+  // Show preterm toggle only on 0-1y separate view (not on the dedicated
+  // preterm chart — everything is preterm there — and not in combined view
+  // where it has no effect)
+  updatePretermToggleVisibility();
   if (range !== '0-1' && chartState.showPreterm) {
     // Reset preterm toggle state when leaving 0-1y range
     chartState.showPreterm = false;
@@ -2735,7 +2754,9 @@ function attachGhostListeners() {
 // ============================================================
 // MAIN: PLOT CHARTS
 // ============================================================
-function plotCharts() {
+// preserveRange: skip auto-range selection (used when restoring a saved
+// session, so the user's last-chosen range survives a page reload).
+function plotCharts(preserveRange) {
   clearAlerts();
   const sex = document.querySelector('input[name=sex]:checked')?.value;
   const dob = document.getElementById('dob').value;
@@ -2787,7 +2808,7 @@ function plotCharts() {
   // v1.8: preterm takes precedence — if the earliest measurement is in the
   // preterm window (<= 2w post-term), land on the dedicated preterm chart.
   const allAges = [...htMeasurements, ...wtMeasurements].map(m => m.corrAge);
-  if (allAges.length > 0) {
+  if (allAges.length > 0 && !preserveRange) {
     const maxAge = Math.max(...allAges);
     const minAge = Math.min(...allAges);
     const PRETERM_CUTOFF = 2 / 52.18; // 2 weeks post-term = top of uk90_preterm dataset
@@ -2939,11 +2960,8 @@ function loadState() {
     if (btnC) btnC.classList.toggle("active", chartState.viewMode === "combined");
     if (btnS) btnS.classList.toggle("active", chartState.viewMode === "separate");
     // Restore preterm toggle visibility and state
-    const pretSepR   = document.getElementById("pretSep");
-    const pretGroupR = document.getElementById("pretGroup");
+    updatePretermToggleVisibility();
     const pretBtnR   = document.getElementById("btnPreterm");
-    if (pretSepR)   pretSepR.style.display   = chartState.range === "0-1" ? "" : "none";
-    if (pretGroupR) pretGroupR.style.display = chartState.range === "0-1" ? "" : "none";
     if (pretBtnR) {
       pretBtnR.classList.toggle("active", chartState.showPreterm);
       pretBtnR.textContent = chartState.showPreterm ? "− Preterm" : "+ Preterm";
@@ -3023,6 +3041,10 @@ function newPatient() {
   document.getElementById("gestWeeks").value = "40";
   document.getElementById("gestDays").value = "0";
   document.querySelectorAll("input[name=sex]")[0].checked = true;
+  // Setting .checked programmatically does NOT fire the change listener that
+  // normally re-applies the theme — reset it explicitly or a cleared girl
+  // patient leaves the UI pink with "Boy" selected.
+  applySexTheme("male");
 
   // 5. Clear and rebuild measurement rows
   document.getElementById("measurementRows").innerHTML = "";
@@ -3037,13 +3059,9 @@ function newPatient() {
   const npBtn = document.getElementById("btn01");
   if (npBtn) npBtn.classList.add("active");
   chartState.showPreterm = false;
-  const pretBtnNP   = document.getElementById("btnPreterm");
-  const pretSepNP   = document.getElementById("pretSep");
-  const pretGroupNP = document.getElementById("pretGroup");
-  if (pretBtnNP)   { pretBtnNP.classList.remove("active"); pretBtnNP.textContent = "+ Preterm"; }
-  // 0-1y is default on new patient so show the toggle
-  if (pretSepNP)   pretSepNP.style.display   = "";
-  if (pretGroupNP) pretGroupNP.style.display = "";
+  const pretBtnNP = document.getElementById("btnPreterm");
+  if (pretBtnNP) { pretBtnNP.classList.remove("active"); pretBtnNP.textContent = "+ Preterm"; }
+  updatePretermToggleVisibility();
   // Reset view mode buttons
   const npBtnC = document.getElementById("btnCombined");
   const npBtnS = document.getElementById("btnSeparate");
@@ -3231,7 +3249,7 @@ function runTests() {
       const id = row.id.replace('row-', '');
       return (document.getElementById(`mwt-${id}`)?.value || document.getElementById(`mht-${id}`)?.value);
     });
-    if (dob && hasValue) plotCharts();
+    if (dob && hasValue) plotCharts(true); // preserve the restored range
   }
 })();
 
@@ -3248,7 +3266,7 @@ window.addEventListener('resize', () => {
 
 <!-- Footer -->
 <div style="background:var(--accent-light);color:#000000;font-size:0.7rem;padding:8px 20px;text-align:center;line-height:1.6">
-  PaedPlot v1.0 — Offline growth chart reference tool |
+  PaedPlot v2.1 — Offline growth chart reference tool |
   LMS method: Cole &amp; Green (1992) | UK–WHO reference data (RCPCH growth-references) |
   Session data is stored locally in this browser only and never transmitted. Press New Patient to clear.
 </div>
