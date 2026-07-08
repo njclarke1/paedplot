@@ -8,8 +8,8 @@ PaedPlot is a fully offline, single-file HTML tool for plotting UK-WHO paediatri
 
 ## Current state
 
-**Version:** v2.1 (June 2026)
-**Working file:** `src/paedplot.html` (~298KB, ~3270 lines — includes ~90KB embedded Hind WOFF2 font)
+**Version:** v2.2 (July 2026) — viewport-fit sizing overhaul
+**Working file:** `src/paedplot.html` (~306KB, ~3400 lines — includes ~90KB embedded Hind WOFF2 font)
 **Validation status:** SDS calculation engine validated against live RCPCH Digital Growth Charts API to ±0.001 SDS across all datasets, boundaries, and extremes (April 2026). See `docs/VALIDATION_RECORD.md`. June 2026 audit confirmed the engine and LMS data are byte-identical to the validated v1.9 build.
 
 ## Architecture overview
@@ -24,7 +24,7 @@ paedplot.html
 └── <script>          lines 780-3265    JavaScript (~2480 lines)
 ```
 
-### JavaScript organisation (top to bottom; line numbers as of v2.1)
+### JavaScript organisation (top to bottom; line numbers as of v2.1 — the July 2026 sizing overhaul shifted everything below the layout constants by roughly +120 lines)
 
 | Section | Lines | Purpose |
 |---|---|---|
@@ -78,7 +78,9 @@ paedplot.html
 }
 ```
 
-One grid square = `pxPerSquare × pxPerSquare` pixels, always truly square. Panel width = `xSquares × pxPerSquare`. Panel height = `ySquares × pxPerSquare`. pxPerSquare is clamped to [10, 32] in the separate view and derived from fitting the chart to container width. (The combined view has no MAX cap — it fills the width and grows taller.)
+One grid square = `pxPerSquare × pxPerSquare` pixels, always truly square. Panel width = `xSquares × pxPerSquare`. Panel height = `ySquares × pxPerSquare`.
+
+**Viewport-fit sizing (July 2026):** `pxPerSquare` is fitted to BOTH container width and viewport height via the shared `fitSquareAndScale(xSquares, ySquares, panels)` helper (used by both renderers; measures the DOM once, iterates the margins↔scale fixed point, returns `{pxSq, s, margins}`) — the whole chart (both stacked panels in separate view; the single canvas in combined view) is visible in one screenful. `getViewportBudget()`: two-column layout subtracts the chart stack's measured document offset from `window.innerHeight` (so wrapped control rows are accounted for); single-column (≤700px) uses `innerHeight − 64` since the user scrolls the chart into view; `CHROME_RESERVE` (150) is only the can't-measure fallback. Floor `MIN_PX_PER_SQUARE = 10` (legibility — when it binds, the chart overflows and scrolls); cap `MAX_PX_PER_SQUARE = 40` (safety only — the height fit is the effective ceiling). A UI scale factor `s = clamp(pxSq/16, 0.8, 1.5)` (`getUIScale`) scales fonts (`fontPx`, 8px floor), margins (`scaleMargins`), ticks, dots and centile line widths so the label-to-grid ratio stays constant. X-axis labels use greedy collision-avoided layout (`layoutXLabels` — priority tags emitted by `getGridSpec` (`pri: 0` = whole years/"Birth") claim space first; ticks always stay); y-axis labels in both views go through the shared `drawYGutter` overlap guard (skipped label = skipped tick). `renderBothCharts` routes to `drawCombinedChart` BEFORE computing any separate-view sizing. Canvases letterbox-centre via `.chart-block canvas { margin: 0 auto }`; `html { scrollbar-gutter: stable }` prevents the render→scrollbar→stale-width feedback loop.
 
 **`COMBINED_CHART_CONFIG`** — per-range geometry for the combined (dual-axis) view: `ageMin/ageMax` (with `_F` girl overrides: girls 2–8y / 8–18y), `HT_ANCHOR`/`WT_ANCHOR` (this cm == this kg at the same y-pixel), `STEP_HT`/`WT_MAJOR` (cm and kg per grid square → independent y-scales `pxPerCm = pxSq/STEP_HT`, `pxPerKg = pxSq/WT_MAJOR`), `STEP_WT`/`LABEL_HT_STEP` (label intervals), and `LEFT/RIGHT_WT_MAX` / `LEFT/RIGHT_HT_MIN` dual-axis label cutoffs. Preterm and 2–18y ranges have no config → always render in separate view. Full field reference lives in the combined-chart comment block in the source (~line 1880).
 
@@ -182,7 +184,8 @@ paedplot/
     ├── paedplot_v2.0-phase1.html
     ├── paedplot_v2.0-phase2.html
     ├── paedplot_v2.0-design.html
-    └── paedplot_v2.1.html
+    ├── paedplot_v2.1.html
+    └── paedplot_v2.2.html
 ```
 
 ## v2.0 roadmap — unified single-canvas chart
@@ -228,12 +231,10 @@ Replace the current two-stacked-canvas model (height panel above, weight panel b
 
 ## Known limitations
 
-- X-axis label collisions on very small screens (not addressed)
-- Y-axis labels occasionally cut off at extremes
+- X-axis label collisions: resolved July 2026 (`layoutXLabels` greedy placement); y-gutter overlaps resolved by the shared `drawYGutter` skip guard
 - OFC: LMS data embedded but no chart panel built
 - Print layout: STALE — `@media print` rules target classes removed in v2.0 (`.chart-panel`, `.chart-tabs`, `.chart-title`, `.print-header`), hides the results panel, and does not hide `.chart-controls`. Needs a dedicated pass.
-- Horizontal scroll on 1-4y separate view on narrow phones (acceptable trade-off)
-- Combined view can grow very tall on wide screens (no MAX pxPerSquare cap — by design, vertical scrolling expected)
+- Scroll on 1-4y (both views) on narrow phones — the 10px legibility floor binds (accepted trade-off, confirmed July 2026)
 - Combined view plots preterm measurements at corrected age only (no ✕/chronological-dot pair as in separate view) — but the legend still shows "✕ Corrected age" for preterm patients
 - `docs/` briefing, explainer, and CODEBASE_REFERENCE still describe v1.9 — pending a refresh
 
