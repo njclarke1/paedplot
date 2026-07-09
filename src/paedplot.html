@@ -725,6 +725,11 @@
           <button class="ctrl-btn active" id="btnCombined"  onclick="setViewMode('combined')">Combined</button>
           <button class="ctrl-btn"        id="btnSeparate"  onclick="setViewMode('separate')">Separate</button>
         </div>
+        <div class="ctrl-sep"></div>
+        <div class="ctrl-group">
+          <button class="ctrl-btn" id="btnPaper" onclick="setZoomMode('paper')" title="A4 paper scale — scroll to pan">Paper</button>
+          <button class="ctrl-btn" id="btnFit"   onclick="setZoomMode('fit')"   title="Shrink whole chart to fit the screen">Fit</button>
+        </div>
       </div>
 
       <!-- Stacked charts -->
@@ -1057,6 +1062,7 @@ let chartState = {
   range: '0-1',        // '0-1' | '1-4' | '2-9' | '9-18' | '2-18'
   showPreterm: false,  // whether to show preterm section on 0-1y chart
   viewMode: 'combined', // 'combined' | 'separate' — v2.0 Phase 1
+  zoomMode: null,       // 'paper' | 'fit' | null — null = device default (v2.3)
   htMeasurements: [],
   wtMeasurements: [],
   gestWeeks: 40,
@@ -1093,20 +1099,41 @@ const MARGINS_BOTTOM_PANEL = { top: 4,  right: 52, bottom: 42, left: 46 }; // no
 // ─────────────────────────────────────────────────────────────────────────────
 const GRID = {
   'preterm':{ xYears: 1/52,  htCm: 1, wtKg: 0.1 }, // 1-week × 1cm × 0.1kg squares — dedicated preterm view (23w→42w gestation)
-  '0-1':  { xYears: 2/52,  htCm: 1, wtKg: 0.5 }, // 2-week × 1cm × 0.5kg squares
-  '1-4':  { xYears: 1/12,  htCm: 1, wtKg: 0.5 }, // 1-month × 1cm × 0.5kg squares
-  '2-9':  { xYears: 0.5,   htCm: 5, wtKg: 2   }, // 2kg/sq — taller weight panel with integer labels (v1.5.1)
+  '0-1':  { xYears: 2/52,  htCm: 2, wtKg: 0.5 }, // 2-week × 2cm × 0.5kg squares (paper: 1.94cm/0.48kg per 2wk)
+  '1-4':  { xYears: 1/12,  htCm: 2, wtKg: 0.5 }, // 1-month × 2cm × 0.5kg squares (paper: 2.17cm/0.56kg per 1mo)
+  '2-9':  { xYears: 0.5,   htCm: 5, wtKg: 5   }, // 0.5y × 5cm × 5kg squares (paper: 5.37cm ≡ 5.37kg per 0.5y)
   '9-18': { xYears: 0.5,   htCm: 5, wtKg: 5   },
   '2-18': { xYears: 0.5,   htCm: 5, wtKg: 5   },
 };
 const MIN_PX_PER_SQUARE = 10; // legibility floor — when it binds, the chart overflows the viewport and scrolls
 const MAX_PX_PER_SQUARE = 40; // safety cap — the viewport-height fit below is the real ceiling (v2.2)
+// Paper zoom (v2.3): every range renders at the SAME plot width — like the real
+// charts, which are all printed on the same A4 sheet with a per-chart grid
+// pitch. Calibrated so the 1-4y chart (36 x-squares) gets 20px squares
+// (≈5mm at 96dpi); ranges with fewer x-squares get proportionally bigger
+// squares and scroll further vertically.
+const PAPER_PLOT_WIDTH = 36 * 20; // px
 
 // ── VIEWPORT-FIT SIZING (v2.2) ───────────────────────────────────────────────
 // Square size is fitted to BOTH container width and viewport height, so the
 // whole chart is visible at once (paper-chart-at-arm's-length) on any screen.
 // CHROME_RESERVE is only the fallback when the chart stack can't be measured.
 const CHROME_RESERVE = 150;
+
+// Single-column (phone) layout uses the same 700px breakpoint as the CSS.
+function isSingleColumn() {
+  return !!(window.matchMedia && window.matchMedia('(max-width: 700px)').matches);
+}
+
+// Effective zoom mode (v2.3). 'paper' pins the grid square at A4 scale and lets
+// the page scroll (like sliding a paper chart around a desk); 'fit' shrinks the
+// whole chart into one screenful (v2.2 behaviour). Until the user picks one
+// explicitly, the default tracks the layout: paper on desktop (where fit made
+// squares comically small), fit on phones (where one-screenful works well).
+function getZoomMode() {
+  if (chartState.zoomMode === 'paper' || chartState.zoomMode === 'fit') return chartState.zoomMode;
+  return isSingleColumn() ? 'fit' : 'paper';
+}
 
 function getViewportBudget() {
   // Vertical pixels one chart stack may occupy, floored so tiny landscape
@@ -1120,8 +1147,7 @@ function getViewportBudget() {
   // and the user scrolls it into view, so the chart may use nearly the whole
   // window height (small allowance keeps a sliver of context visible).
   const vh = window.innerHeight || 800;
-  const singleCol = window.matchMedia && window.matchMedia('(max-width: 700px)').matches;
-  if (singleCol) return Math.max(360, vh - 64);
+  if (isSingleColumn()) return Math.max(360, vh - 64);
   const stack = document.getElementById('chartsStack');
   const chrome = stack
     ? stack.getBoundingClientRect().top + window.scrollY
@@ -1161,6 +1187,16 @@ function fontPx(base, s) {
 //
 // Returns { pxSq, s, margins } where margins is the scaled panel margin list.
 function fitSquareAndScale(xSquares, ySquares, panels) {
+  // Paper zoom (v2.3): constant plot width, square size derived per range —
+  // no viewport fitting. The chart scrolls vertically (page scroll) and, on
+  // narrow windows, horizontally (.charts-stack overflow-x) — exactly like a
+  // physical chart bigger than the screen. s depends only on xSquares, not on
+  // the margins, so no fixed-point iteration is needed.
+  if (getZoomMode() === 'paper') {
+    const pxSq = PAPER_PLOT_WIDTH / xSquares;
+    const s = getUIScale(pxSq);
+    return { pxSq, s, margins: panels.map(p => scaleMargins(p, s)) };
+  }
   const availW = getCanvasWidth();
   const availH = getViewportBudget();
   const fitWith = (margins) => {
@@ -1982,6 +2018,24 @@ function getGridSpec(range) {
   }
 }
 
+// Reflect the EFFECTIVE zoom mode (explicit choice or device default) on the
+// Paper|Fit buttons. Called on init, restore, newPatient, resize (the default
+// can flip when the layout crosses the 700px breakpoint) and setZoomMode.
+function syncZoomButtons() {
+  const mode = getZoomMode();
+  const btnP = document.getElementById('btnPaper');
+  const btnF = document.getElementById('btnFit');
+  if (btnP) btnP.classList.toggle('active', mode === 'paper');
+  if (btnF) btnF.classList.toggle('active', mode === 'fit');
+}
+
+function setZoomMode(mode) {
+  chartState.zoomMode = mode;
+  syncZoomButtons();
+  renderBothCharts();
+  saveState();
+}
+
 function setViewMode(mode) {
   chartState.viewMode = mode;
   const btnC = document.getElementById('btnCombined');
@@ -2033,11 +2087,18 @@ function setViewMode(mode) {
 //   2-9y     —  2 sq/y  (6-month squares, xYears = 0.5)
 //   9-18y    —  2 sq/y  (6-month squares, xYears = 0.5)
 //
-// CURRENT RATIOS (as tuned by Nick, May 2026)
-//   0-1y:  4w = 0.75kg = 2cm   → STEP_HT 1,   WT_MAJOR 0.375
-//   1-4y:  1y = 3.5kg  = ~9cm  → STEP_HT 1,   WT_MAJOR 0.5
-//   2-9y:  1y = 6kg    = 6cm   → STEP_HT 3,   WT_MAJOR 3
-//   9-18y: 1y = 6kg    = 6cm   → STEP_HT 3,   WT_MAJOR 3
+// CURRENT RATIOS — calibrated against the printed RCPCH charts (July 2026,
+// measured from the Girls 0-4y and 2-18y chart PDFs' vector coordinates;
+// supersedes Nick's May 2026 hand-tuned values, which rendered up to 1.8×
+// too tall and read as "too narrow" at a paper-matched width).
+// Paper truth, per one x-square width:
+//   0-1y (2wk):  1.94cm ≡ 0.48kg  → STEP_HT 2, WT_MAJOR 0.5
+//   1-4y (1mo):  2.17cm ≡ 0.56kg  → STEP_HT 2, WT_MAJOR 0.5
+//   2-8y (0.5y): 5.37cm ≡ 5.37kg  → STEP_HT 5, WT_MAJOR 5
+//   8-18y (0.5y): 4.54cm ≡ 4.54kg → STEP_HT 5, WT_MAJOR 5 (nearest clean unit)
+// The 2-18y anchors (e.g. girls 125cm ≡ 90kg) already match the printed
+// chart's alignment exactly; with paper-true scales the school-age combined
+// view is near-facsimile of the paper layout.
 //
 // GRIDLINE BEHAVIOUR
 //   Major horizontal gridlines appear at every STEP_HT cm (= one pxSq interval).
@@ -2058,13 +2119,13 @@ function setViewMode(mode) {
 //   drawCombinedChart() → persists chosen ratio to localStorage.
 // ============================================================
 const COMBINED_CHART_CONFIG = {
-  '0-1':  { ageMin: 0,  ageMax: 1,  HT_ANCHOR: 60,  WT_ANCHOR: 13,  STEP_HT: 1, STEP_WT: 1,  drawMinors: false, WT_MAJOR: 0.375,
-            LEFT_WT_MAX: 7,  LEFT_HT_MIN: 44, RIGHT_WT_MAX: 13.5, RIGHT_HT_MIN: 64,  LABEL_HT_STEP: 5 },
-  '1-4':  { ageMin: 1,  ageMax: 4,  HT_ANCHOR: 84,  WT_ANCHOR: 23,  STEP_HT: 1, STEP_WT: 2,  drawMinors: true,  WT_MAJOR: 0.5,
-            LEFT_WT_MAX: 14, LEFT_HT_MIN: 64, RIGHT_WT_MAX: 25,   RIGHT_HT_MIN: 88,  LABEL_HT_STEP: 5 },
-  '2-9':  { ageMin: 2,  ageMax: 9,  ageMax_F: 8,  HT_ANCHOR: 100, WT_ANCHOR: 50,  HT_ANCHOR_F: 95,  WT_ANCHOR_F: 45,  STEP_HT: 3, STEP_WT: 5,  drawMinors: true,  WT_MAJOR: 3,
+  '0-1':  { ageMin: 0,  ageMax: 1,  HT_ANCHOR: 60,  WT_ANCHOR: 13,  STEP_HT: 2, STEP_WT: 1,  drawMinors: false, WT_MAJOR: 0.5,
+            LEFT_WT_MAX: 7,  LEFT_HT_MIN: 44, RIGHT_WT_MAX: 13.5, RIGHT_HT_MIN: 64,  LABEL_HT_STEP: 2 },
+  '1-4':  { ageMin: 1,  ageMax: 4,  HT_ANCHOR: 84,  WT_ANCHOR: 23,  STEP_HT: 2, STEP_WT: 2,  drawMinors: true,  WT_MAJOR: 0.5,
+            LEFT_WT_MAX: 14, LEFT_HT_MIN: 64, RIGHT_WT_MAX: 25,   RIGHT_HT_MIN: 88,  LABEL_HT_STEP: 4 },
+  '2-9':  { ageMin: 2,  ageMax: 9,  ageMax_F: 8,  HT_ANCHOR: 100, WT_ANCHOR: 50,  HT_ANCHOR_F: 95,  WT_ANCHOR_F: 45,  STEP_HT: 5, STEP_WT: 5,  drawMinors: true,  WT_MAJOR: 5,
             LEFT_WT_MAX: 20, LEFT_HT_MIN: 75, RIGHT_WT_MAX: 50,   RIGHT_HT_MIN: 105, LABEL_HT_STEP: 5 },
-  '9-18': { ageMin: 9,  ageMax: 18, ageMin_F: 8,  HT_ANCHOR: 125, WT_ANCHOR: 100, HT_ANCHOR_F: 125, WT_ANCHOR_F: 90,  STEP_HT: 3, STEP_WT: 5,  drawMinors: true,  WT_MAJOR: 3,
+  '9-18': { ageMin: 9,  ageMax: 18, ageMin_F: 8,  HT_ANCHOR: 125, WT_ANCHOR: 100, HT_ANCHOR_F: 125, WT_ANCHOR_F: 90,  STEP_HT: 5, STEP_WT: 5,  drawMinors: true,  WT_MAJOR: 5,
             LEFT_WT_MAX: 80, LEFT_HT_MIN: 110, RIGHT_WT_MAX: 100, RIGHT_HT_MIN: 135,
             LEFT_WT_MAX_F: 70, LEFT_HT_MIN_F: 110, RIGHT_WT_MAX_F: 95, RIGHT_HT_MIN_F: 135, LABEL_HT_STEP: 5 },
 };
@@ -3051,6 +3112,7 @@ function saveState() {
       gestDays:   document.getElementById("gestDays").value,
       chartRange:   chartState.range,
       viewMode:     chartState.viewMode,
+      zoomMode:     chartState.zoomMode,
       showPreterm:  chartState.showPreterm,
       rows
     };
@@ -3067,6 +3129,7 @@ function loadState() {
     // Restore chart state
     if (state.chartRange)  chartState.range       = state.chartRange;
     if (state.viewMode === 'combined' || state.viewMode === 'separate') chartState.viewMode = state.viewMode;
+    if (state.zoomMode === 'paper' || state.zoomMode === 'fit') chartState.zoomMode = state.zoomMode;
     if (state.showPreterm !== undefined) chartState.showPreterm = state.showPreterm;
 
     // Sync range buttons
@@ -3082,6 +3145,7 @@ function loadState() {
     const btnS = document.getElementById("btnSeparate");
     if (btnC) btnC.classList.toggle("active", chartState.viewMode === "combined");
     if (btnS) btnS.classList.toggle("active", chartState.viewMode === "separate");
+    syncZoomButtons();
     // Restore preterm toggle visibility and state
     updatePretermToggleVisibility();
     const pretBtnR   = document.getElementById("btnPreterm");
@@ -3145,6 +3209,7 @@ function newPatient() {
   chartState.sex             = "male";
   chartState.range           = "0-1";
   chartState.viewMode        = "combined";
+  chartState.zoomMode        = null; // back to device default
 
   // 2. Clear canvases explicitly
   ["htCanvas", "wtCanvas"].forEach(id => {
@@ -3190,6 +3255,7 @@ function newPatient() {
   const npBtnS = document.getElementById("btnSeparate");
   if (npBtnC) npBtnC.classList.add("active");
   if (npBtnS) npBtnS.classList.remove("active");
+  syncZoomButtons();
   // 7. Show empty state, hide charts
   document.getElementById("emptyState").style.display = "block";
   document.getElementById("chartsContainer").style.display = "none";
@@ -3356,6 +3422,7 @@ function runTests() {
   attachSaveListeners();
   attachGhostListeners();
   updateGhostValues();
+  syncZoomButtons();
 
   // Apply sex theme from current radio on page load, and re-apply whenever the
   // user toggles between Boy / Girl so the accent switches live.
@@ -3380,6 +3447,7 @@ function runTests() {
 window.addEventListener('resize', () => {
   clearTimeout(window._resizeTimer);
   window._resizeTimer = setTimeout(() => {
+    syncZoomButtons(); // device-default zoom can flip across the 700px breakpoint
     if (document.getElementById('chartsContainer').style.display !== 'none') {
       renderBothCharts();
     }

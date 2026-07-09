@@ -8,7 +8,7 @@ PaedPlot is a fully offline, single-file HTML tool for plotting UK-WHO paediatri
 
 ## Current state
 
-**Version:** v2.2 (July 2026) — viewport-fit sizing overhaul
+**Version:** v2.3-dev (July 2026) — Paper/Fit zoom modes (fixes charts rendering comically small on desktop); v2.2 was the viewport-fit sizing overhaul. Footer/print strings still say v2.2 pending on-device sign-off.
 **Working file:** `src/paedplot.html` (~306KB, ~3400 lines — includes ~90KB embedded Hind WOFF2 font)
 **Validation status:** SDS calculation engine validated against live RCPCH Digital Growth Charts API to ±0.001 SDS across all datasets, boundaries, and extremes (April 2026). See `docs/VALIDATION_RECORD.md`. June 2026 audit confirmed the engine and LMS data are byte-identical to the validated v1.9 build.
 
@@ -57,6 +57,7 @@ paedplot.html
   range: 'preterm'|'0-1'|'1-4'|'2-9'|'9-18'|'2-18',
   showPreterm: boolean,
   viewMode: 'combined'|'separate',   // v2.0 — default 'combined'
+  zoomMode: 'paper'|'fit'|null,      // v2.3 — null = device default (paper on desktop, fit on phones)
   gestWeeks: number, gestDays: number,
   htCentileCache: { datasetName: [{age, vals[9]}] },
   wtCentileCache: same structure,
@@ -70,17 +71,21 @@ paedplot.html
 ```javascript
 {
   'preterm': { xYears: 1/52,  htCm: 1, wtKg: 0.1 },
-  '0-1':    { xYears: 2/52,  htCm: 1, wtKg: 0.5 },
-  '1-4':    { xYears: 1/12,  htCm: 1, wtKg: 0.5 },
-  '2-9':    { xYears: 0.5,   htCm: 5, wtKg: 2   },
+  '0-1':    { xYears: 2/52,  htCm: 2, wtKg: 0.5 },
+  '1-4':    { xYears: 1/12,  htCm: 2, wtKg: 0.5 },
+  '2-9':    { xYears: 0.5,   htCm: 5, wtKg: 5   },
   '9-18':   { xYears: 0.5,   htCm: 5, wtKg: 5   },
   '2-18':   { xYears: 0.5,   htCm: 5, wtKg: 5   },
 }
 ```
 
+**Paper-calibrated proportions (v2.3, July 2026):** the cm/kg-per-square values above and the combined view's `STEP_HT`/`WT_MAJOR` were calibrated against the printed RCPCH charts by measuring the Girls 0-4y and 2-18y PDF vector coordinates (paper truth per x-square: 0-1y 1.94cm/0.48kg, 1-4y 2.17cm/0.56kg, 2-8y 5.37cm≡5.37kg, 8-18y 4.54cm≡4.54kg — the 2-18 paper chart uses 1kg≡1cm throughout, and its printed height/weight alignment matches the existing combined-view anchors exactly). Combined config is now STEP_HT 2/WT_MAJOR 0.5 (0-1, 1-4) and 5/5 (2-9, 9-18); LABEL_HT_STEP 2 (0-1, matching paper's 2cm height labels) and 4 (1-4). Superseded values (STEP_HT 1/3, WT_MAJOR 0.375/3, GRID htCm 1, 2-9 wtKg 2) rendered up to ~1.8-2.7× too tall, which at a fixed plot width read as "much narrower than paper".
+
 One grid square = `pxPerSquare × pxPerSquare` pixels, always truly square. Panel width = `xSquares × pxPerSquare`. Panel height = `ySquares × pxPerSquare`.
 
-**Viewport-fit sizing (July 2026):** `pxPerSquare` is fitted to BOTH container width and viewport height via the shared `fitSquareAndScale(xSquares, ySquares, panels)` helper (used by both renderers; measures the DOM once, iterates the margins↔scale fixed point, returns `{pxSq, s, margins}`) — the whole chart (both stacked panels in separate view; the single canvas in combined view) is visible in one screenful. `getViewportBudget()`: two-column layout subtracts the chart stack's measured document offset from `window.innerHeight` (so wrapped control rows are accounted for); single-column (≤700px) uses `innerHeight − 64` since the user scrolls the chart into view; `CHROME_RESERVE` (150) is only the can't-measure fallback. Floor `MIN_PX_PER_SQUARE = 10` (legibility — when it binds, the chart overflows and scrolls); cap `MAX_PX_PER_SQUARE = 40` (safety only — the height fit is the effective ceiling). A UI scale factor `s = clamp(pxSq/16, 0.8, 1.5)` (`getUIScale`) scales fonts (`fontPx`, 8px floor), margins (`scaleMargins`), ticks, dots and centile line widths so the label-to-grid ratio stays constant. X-axis labels use greedy collision-avoided layout (`layoutXLabels` — priority tags emitted by `getGridSpec` (`pri: 0` = whole years/"Birth") claim space first; ticks always stay); y-axis labels in both views go through the shared `drawYGutter` overlap guard (skipped label = skipped tick). `renderBothCharts` routes to `drawCombinedChart` BEFORE computing any separate-view sizing. Canvases letterbox-centre via `.chart-block canvas { margin: 0 auto }`; `html { scrollbar-gutter: stable }` prevents the render→scrollbar→stale-width feedback loop.
+**Zoom modes (v2.3, July 2026):** two zoom modes toggled by a Paper|Fit button pair next to Combined/Separate. **Paper** pins the PLOT WIDTH constant across ranges — `pxSq = PAPER_PLOT_WIDTH / xSquares`, where `PAPER_PLOT_WIDTH = 36 × 20 = 720px` is calibrated so the 1-4y chart (36 x-squares) gets 20px (≈5mm-at-96dpi) squares — mirroring the real charts, which all print at the same A4 sheet width with per-chart grid pitch. Ranges with fewer x-squares (2-9y has 14) get proportionally bigger squares and more vertical page scroll. **Fit** is the v2.2 viewport-fit behaviour below. `getZoomMode()` resolves the effective mode: explicit `chartState.zoomMode` if set, else device default — paper on two-column desktop, fit on single-column phones (`isSingleColumn()`, same 700px breakpoint as the CSS). `fitSquareAndScale` short-circuits in paper mode (fixed `s = getUIScale(20) = 1.25`, no fixed-point iteration). `syncZoomButtons()` reflects the effective mode; called on init, restore, newPatient, setZoomMode and resize (the default can flip across the breakpoint). Persisted as `zoomMode` in the session (null = still on device default).
+
+**Viewport-fit sizing (v2.2 / 'Fit' mode):** `pxPerSquare` is fitted to BOTH container width and viewport height via the shared `fitSquareAndScale(xSquares, ySquares, panels)` helper (used by both renderers; measures the DOM once, iterates the margins↔scale fixed point, returns `{pxSq, s, margins}`) — the whole chart (both stacked panels in separate view; the single canvas in combined view) is visible in one screenful. `getViewportBudget()`: two-column layout subtracts the chart stack's measured document offset from `window.innerHeight` (so wrapped control rows are accounted for); single-column (≤700px) uses `innerHeight − 64` since the user scrolls the chart into view; `CHROME_RESERVE` (150) is only the can't-measure fallback. Floor `MIN_PX_PER_SQUARE = 10` (legibility — when it binds, the chart overflows and scrolls); cap `MAX_PX_PER_SQUARE = 40` (safety only — the height fit is the effective ceiling). A UI scale factor `s = clamp(pxSq/16, 0.8, 1.5)` (`getUIScale`) scales fonts (`fontPx`, 8px floor), margins (`scaleMargins`), ticks, dots and centile line widths so the label-to-grid ratio stays constant. X-axis labels use greedy collision-avoided layout (`layoutXLabels` — priority tags emitted by `getGridSpec` (`pri: 0` = whole years/"Birth") claim space first; ticks always stay); y-axis labels in both views go through the shared `drawYGutter` overlap guard (skipped label = skipped tick). `renderBothCharts` routes to `drawCombinedChart` BEFORE computing any separate-view sizing. Canvases letterbox-centre via `.chart-block canvas { margin: 0 auto }`; `html { scrollbar-gutter: stable }` prevents the render→scrollbar→stale-width feedback loop.
 
 **`COMBINED_CHART_CONFIG`** — per-range geometry for the combined (dual-axis) view: `ageMin/ageMax` (with `_F` girl overrides: girls 2–8y / 8–18y), `HT_ANCHOR`/`WT_ANCHOR` (this cm == this kg at the same y-pixel), `STEP_HT`/`WT_MAJOR` (cm and kg per grid square → independent y-scales `pxPerCm = pxSq/STEP_HT`, `pxPerKg = pxSq/WT_MAJOR`), `STEP_WT`/`LABEL_HT_STEP` (label intervals), and `LEFT/RIGHT_WT_MAX` / `LEFT/RIGHT_HT_MIN` dual-axis label cutoffs. Preterm and 2–18y ranges have no config → always render in separate view. Full field reference lives in the combined-chart comment block in the source (~line 1880).
 
