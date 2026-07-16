@@ -43,6 +43,13 @@
     --heading: #000000;
     --muted: #000000;
 
+    /* v2.4: document-viewer idiom — the chart is a paper "sheet" on a grey
+       "desk". --page-tint is the sheet's background: extremely subtle sex
+       tint, matching the RCPCH printed charts' tinted stock (overridden by
+       body.sex-girls below). */
+    --chart-desk: #f0f2f4;
+    --page-tint: #fbfdff;   /* boys default */
+
     /* Sex-accent defaults to boys (blue) — overridden by body.sex-girls below */
     --accent: #2081c3;
     --accent-hover: #1a6fa8;
@@ -67,6 +74,7 @@
     --accent-light: #f7e6f0;   /* girls accent light */
     --dot-ht: #9dc955;
     --dot-wt: #559dc9;
+    --page-tint: #fffbfd;      /* girls sheet tint */
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -284,11 +292,13 @@
     flex-wrap: wrap;
   }
 
-  /* CHART AREA */
+  /* CHART AREA — the "desk" the paper sheet sits on (v2.4 document-viewer
+     idiom). No overflow-y here: the window is the one vertical scroller
+     (needed for .sticky-age-axis's position:sticky to engage against the
+     viewport rather than a container that never actually scrolls). */
   .chart-area {
-    background: var(--page-bg);
+    background: var(--chart-desk);
     padding: 16px;
-    overflow-y: auto;
   }
 
   .chart-tabs {
@@ -334,9 +344,13 @@
     letter-spacing: 0.03em;
   }
 
+  /* NEVER constrain chart canvas display size (e.g. max-width) — the JS sets
+     style.width/height to the exact painted CSS size, and any override scales
+     one axis independently (height stays explicit), silently DESTROYING the
+     paper-calibrated grid proportions. A canvas wider than its column must
+     scroll via .charts-stack overflow-x, not shrink. */
   canvas {
     display: block;
-    max-width: 100%;
     cursor: crosshair;
   }
 
@@ -345,8 +359,9 @@
   .results-panel {
     margin-top: 12px;
     background: #ffffff;
-    border: 2px solid var(--accent);
+    border: 1px solid var(--border);
     border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 4px 14px rgba(0,0,0,.06);
     overflow: hidden;
   }
   .results-header {
@@ -362,6 +377,11 @@
   .results-body {
     padding: 0;
   }
+  /* Docked in the sidebar (v2.4, desktop): cap height and scroll internally
+     so a long measurement history doesn't push the utility buttons below it
+     out of view. */
+  .sidebar .results-panel { margin-top: 12px; margin-bottom: 12px; }
+  .sidebar .results-body { max-height: 40vh; overflow-y: auto; }
   .result-row:nth-child(even) { background: var(--accent-light); }
   .result-row:nth-child(odd)  { background: #ffffff; }
   .result-row {
@@ -480,6 +500,7 @@
     .chart-title { font-size: 1.3rem; }
     canvas { width: 100% !important; height: auto !important; }
     .print-header { display: block !important; }
+    .sticky-age-axis { display: none !important; }
   }
   .print-header {
     display: none;
@@ -577,13 +598,20 @@
     letter-spacing: 0.08em;
     margin-right: 0.4em;
   }
+  /* PAGE CARD (v2.4) — the paper "sheet": a white/tinted card with a soft
+     shadow, floating on the grey --chart-desk. Reads as a document in a
+     viewer rather than a plain canvas on a page. */
+  .page-card {
+    background: var(--page-tint);
+    border: 1px solid #cfd4d9;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 4px 14px rgba(0,0,0,.06);
+    padding: 12px 14px;
+  }
   .charts-stack {
     display: flex;
     flex-direction: column;
     gap: 0;
-    background: var(--cream);
-    border: 1px solid var(--border);
-    border-radius: 2px;
     overflow-x: auto;
     overflow-y: hidden;
     touch-action: pan-y;
@@ -591,6 +619,26 @@
     transition: opacity 0.15s ease-out;
   }
   .charts-stack.fading { opacity: 0; }
+
+  /* STICKY AGE AXIS (v2.4) — frozen pane: no ancestor of this element is a
+     scroll container (the window is the only vertical scroller — see the
+     .chart-area comment), so position:sticky engages against the viewport.
+     Hidden by default; shown/sized by updateStickyAxis only in Fit-width
+     mode when the sheet overflows the viewport. Bleeds over the card's own
+     padding (negative margin) so it reads as part of the same sheet. */
+  .sticky-age-axis {
+    display: none;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--page-tint);
+    border-bottom: 1px solid var(--cream-dark);
+    margin: 0 -14px;
+    padding: 0 14px;
+  }
+  .sticky-age-clip { overflow: hidden; }
+  #stickyAxisCanvas { display: block; margin: 0 auto; }
+
   .chart-block {
     position: relative;
   }
@@ -693,6 +741,10 @@
       &#9679; = chronological age &nbsp; &#10005; = corrected age (preterm)<br>
       Form data is saved locally and restored on refresh.
     </div>
+
+    <!-- Results summary docks here on desktop (two-column layout) — see
+         placeResultsPanel(). On phones it docks below the chart instead. -->
+    <div id="resultsDock"></div>
   </div>
 
   <!-- CHART AREA -->
@@ -722,34 +774,48 @@
         </div>
         <div class="ctrl-sep"></div>
         <div class="ctrl-group">
-          <button class="ctrl-btn active" id="btnCombined"  onclick="setViewMode('combined')">Combined</button>
-          <button class="ctrl-btn"        id="btnSeparate"  onclick="setViewMode('separate')">Separate</button>
+          <button class="ctrl-btn active" id="btnCombined" onclick="setViewMode('combined')">Combined</button>
+          <button class="ctrl-btn"        id="btnWeight"   onclick="setViewMode('weight')">Weight</button>
+          <button class="ctrl-btn"        id="btnHeight"   onclick="setViewMode('height')">Height</button>
         </div>
         <div class="ctrl-sep"></div>
         <div class="ctrl-group">
-          <button class="ctrl-btn" id="btnPaper" onclick="setZoomMode('paper')" title="A4 paper scale — scroll to pan">Paper</button>
-          <button class="ctrl-btn" id="btnFit"   onclick="setZoomMode('fit')"   title="Shrink whole chart to fit the screen">Fit</button>
+          <button class="ctrl-btn" id="btnPaper" onclick="setZoomMode('paper')" title="Fill the window width — scroll vertically to pan">Fit width</button>
+          <button class="ctrl-btn" id="btnFit"   onclick="setZoomMode('fit')"   title="Shrink the whole chart into one screenful">Fit page</button>
         </div>
       </div>
 
       <!-- Stacked charts -->
       <div class="chart-unified-title" id="unifiedTitle">Growth Chart</div>
-      <div class="charts-stack" id="chartsStack">
-        <div class="chart-block" id="htBlock">
-          <canvas id="htCanvas"></canvas>
+      <div class="page-card" id="pageCard">
+        <!-- Sticky age axis (v2.4): shown only in Fit-width mode when the
+             sheet is taller than the viewport, so the age axis stays visible
+             while the page scrolls (see updateStickyAxis). -->
+        <div class="sticky-age-axis" id="stickyAxis">
+          <div class="sticky-age-clip">
+            <canvas id="stickyAxisCanvas"></canvas>
+          </div>
         </div>
-        <div class="chart-block" id="wtBlock">
-          <canvas id="wtCanvas"></canvas>
+        <div class="charts-stack" id="chartsStack">
+          <div class="chart-block" id="htBlock">
+            <canvas id="htCanvas"></canvas>
+          </div>
+          <div class="chart-block" id="wtBlock">
+            <canvas id="wtCanvas"></canvas>
+          </div>
         </div>
+
+        <!-- Legend -->
+        <div class="legend-row" id="sharedLegend"></div>
       </div>
 
-      <!-- Legend -->
-      <div class="legend-row" id="sharedLegend"></div>
-
-      <!-- Results summary -->
-      <div class="results-panel" id="resultsPanel">
-        <div class="results-header">Results Summary</div>
-        <div class="results-body" id="resultsBody"></div>
+      <!-- Results summary docks here on phones (single-column layout) — see
+           placeResultsPanel(). On desktop it docks in the sidebar instead. -->
+      <div id="resultsDockChart">
+        <div class="results-panel" id="resultsPanel">
+          <div class="results-header">Results Summary</div>
+          <div class="results-body" id="resultsBody"></div>
+        </div>
       </div>
 
       <!-- Print footer -->
@@ -1061,7 +1127,7 @@ let chartState = {
   sex: 'male',
   range: '0-1',        // '0-1' | '1-4' | '2-9' | '9-18' | '2-18'
   showPreterm: false,  // whether to show preterm section on 0-1y chart
-  viewMode: 'combined', // 'combined' | 'separate' — v2.0 Phase 1
+  viewMode: 'combined', // 'combined' | 'weight' | 'height' — v2.4 (was 'combined' | 'separate' in v2.0-2.3; 'separate' migrated to 'combined' on load)
   zoomMode: null,       // 'paper' | 'fit' | null — null = device default (v2.3)
   htMeasurements: [],
   wtMeasurements: [],
@@ -1107,12 +1173,15 @@ const GRID = {
 };
 const MIN_PX_PER_SQUARE = 10; // legibility floor — when it binds, the chart overflows the viewport and scrolls
 const MAX_PX_PER_SQUARE = 40; // safety cap — the viewport-height fit below is the real ceiling (v2.2)
-// Paper zoom (v2.3): every range renders at the SAME plot width — like the real
-// charts, which are all printed on the same A4 sheet with a per-chart grid
-// pitch. Calibrated so the 1-4y chart (36 x-squares) gets 20px squares
-// (≈5mm at 96dpi); ranges with fewer x-squares get proportionally bigger
-// squares and scroll further vertically.
-const PAPER_PLOT_WIDTH = 36 * 20; // px
+// Paper zoom (v2.4): fit-width — the sheet fills the chart column (like a PDF
+// viewer at fit-width zoom), clamped so it never shrinks below legibility or
+// blows up absurdly on an ultrawide monitor. Grid pitch stays per-range-
+// proportional (fewer x-squares → bigger squares, more vertical scroll) —
+// exactly the paper-chart trade-off, just sized to the available sheet width
+// instead of a fixed constant (v2.3's PAPER_PLOT_WIDTH, which left dead space
+// on wide columns and didn't grow with the window).
+const SHEET_MIN_WIDTH = 36 * 12; // 432px — below this, .charts-stack horizontal scroll takes over
+const SHEET_MAX_WIDTH = 36 * 30; // 1080px — ultrawide cap (1.5× the old fixed 720px sheet)
 
 // ── VIEWPORT-FIT SIZING (v2.2) ───────────────────────────────────────────────
 // Square size is fitted to BOTH container width and viewport height, so the
@@ -1187,15 +1256,27 @@ function fontPx(base, s) {
 //
 // Returns { pxSq, s, margins } where margins is the scaled panel margin list.
 function fitSquareAndScale(xSquares, ySquares, panels) {
-  // Paper zoom (v2.3): constant plot width, square size derived per range —
-  // no viewport fitting. The chart scrolls vertically (page scroll) and, on
-  // narrow windows, horizontally (.charts-stack overflow-x) — exactly like a
-  // physical chart bigger than the screen. s depends only on xSquares, not on
-  // the margins, so no fixed-point iteration is needed.
+  // Paper zoom (v2.4): fit-width — the sheet fills the chart column width
+  // (clamped to [SHEET_MIN_WIDTH, SHEET_MAX_WIDTH]), square size derived per
+  // range from that. The chart scrolls vertically (page scroll) and, below
+  // the sheet-width floor, horizontally (.charts-stack overflow-x) — exactly
+  // like a physical chart bigger than the screen. Width now depends on the
+  // DOM, so — like the fit branch below — margins↔scale needs the same
+  // fixed-point iteration (margins scale with s, which depends on the fitted
+  // pxSq, which depends on the margins).
   if (getZoomMode() === 'paper') {
-    const pxSq = PAPER_PLOT_WIDTH / xSquares;
-    const s = getUIScale(pxSq);
-    return { pxSq, s, margins: panels.map(p => scaleMargins(p, s)) };
+    const availW = getCanvasWidth();
+    let s = 1, pxSq, margins;
+    for (let i = 0; i < 4; i++) {
+      margins = panels.map(p => scaleMargins(p, s));
+      const sheetW = Math.max(SHEET_MIN_WIDTH,
+        Math.min(SHEET_MAX_WIDTH, availW - margins[0].left - margins[0].right));
+      pxSq = sheetW / xSquares;
+      const s2 = getUIScale(pxSq);
+      if (s2 === s) break; // converged
+      s = s2;
+    }
+    return { pxSq, s, margins };
   }
   const availW = getCanvasWidth();
   const availH = getViewportBudget();
@@ -1269,6 +1350,25 @@ function drawYGutter(ctx, entries, side, geom) {
   }
 }
 
+// Rotated kg/cm unit caption for a dual-axis gutter run (v2.4 polish). Only
+// drawn when the run has enough labels to be self-evidently "this section of
+// the axis" rather than a stray word floating beside a single number.
+//   entries    — the label run this caption belongs to (same shape as drawYGutter)
+//   rotateSign — -1 for the left gutter (text reads bottom-to-top), +1 for the right
+function drawGutterUnitCaption(ctx, entries, label, color, x, rotateSign, s) {
+  if (entries.length < 3) return;
+  const pys = entries.map(e => e.py);
+  const midY = (Math.min(...pys) + Math.max(...pys)) / 2;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.font = `${fontPx(9, s)}px Hind, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.translate(x, midY);
+  ctx.rotate(rotateSign * Math.PI / 2);
+  ctx.fillText(label, 0, 0);
+  ctx.restore();
+}
+
 function getGridUnit(range, measurementMethod) {
   // Returns the panel's "grid square" size in kg or cm — used ONLY for panel
   // sizing (panelHeight = pxPerSquare × valueRange / gridUnit). Separate from
@@ -1338,7 +1438,7 @@ function getVisibleWindow() {
 // gridUnit (optional): kg or cm per grid square. When provided, panel edges snap
 // to multiples of this so the chart border always falls on a gridline. If omitted,
 // falls back to coarse snap candidates (legacy behaviour).
-function computeYRange(centileData, measurements, ageMin, ageMax, isTopPanel, gridUnit, datasetFilter) {
+function computeYRange(centileData, measurements, ageMin, ageMax, panelPos, gridUnit, datasetFilter) {
   let valMin = Infinity, valMax = -Infinity;
   for (const [ds, pts] of Object.entries(centileData)) {
     if (datasetFilter && !datasetFilter(ds)) continue;
@@ -1367,8 +1467,10 @@ function computeYRange(centileData, measurements, ageMin, ageMax, isTopPanel, gr
 
   // Top panel (height): outer pad at top, zero at bottom (faces boundary)
   // Bottom panel (weight): outer pad at bottom, zero at top (faces boundary)
-  const padTop    = isTopPanel  ? outerPad : 0;
-  const padBottom = isTopPanel  ? 0        : outerPad;
+  // Solo panel (weight/height alone): outer pad at both edges — no boundary
+  // to face on either side.
+  const padTop    = (panelPos === 'top'    || panelPos === 'solo') ? outerPad : 0;
+  const padBottom = (panelPos === 'bottom' || panelPos === 'solo') ? outerPad : 0;
 
   // Raw axis limits before snapping
   const rawMin = valMin - padBottom;
@@ -1396,7 +1498,7 @@ function computeYRange(centileData, measurements, ageMin, ageMax, isTopPanel, gr
   };
 }
 
-function drawSingleChart(canvasId, measurementMethod, color, cw, ch, isTopPanel, s = 1) {
+function drawSingleChart(canvasId, measurementMethod, color, cw, ch, panelPos, s = 1) {
   const canvas = document.getElementById(canvasId);
   const sex = chartState.sex;
   const { ageMin, ageMax } = getVisibleWindow();
@@ -1432,7 +1534,7 @@ function drawSingleChart(canvasId, measurementMethod, color, cw, ch, isTopPanel,
     : (chartState.range === '0-1' && !chartState.showPreterm
         ? (ds => ds !== 'uk90_preterm')
         : null);
-  const yRange = computeYRange(centileData, measurements, ageMin, ageMax, isTopPanel, snapUnit, dsFilter);
+  const yRange = computeYRange(centileData, measurements, ageMin, ageMax, panelPos, snapUnit, dsFilter);
   if (!yRange) return;
   const { valMin, valMax } = yRange;
 
@@ -1440,7 +1542,10 @@ function drawSingleChart(canvasId, measurementMethod, color, cw, ch, isTopPanel,
   // Scaled by the UI scale factor so the label gutter tracks the square size —
   // MUST match the scaling renderBothCharts used when pre-sizing cw/ch
   // (both go through scaleMargins with the same s from fitSquareAndScale).
-  const margins = scaleMargins(isTopPanel ? MARGINS_TOP_PANEL : MARGINS_BOTTOM_PANEL, s);
+  const baseMargins = panelPos === 'top' ? MARGINS_TOP_PANEL
+    : panelPos === 'bottom' ? MARGINS_BOTTOM_PANEL
+    : CHART_MARGINS; // solo panel: room for both the top age strip and the full x-axis
+  const margins = scaleMargins(baseMargins, s);
   const T = makeTransform(ageMin, ageMax, valMin, valMax, cw, ch, margins);
 
   // BACKGROUND
@@ -1660,8 +1765,9 @@ function drawSingleChart(canvasId, measurementMethod, color, cw, ch, isTopPanel,
   ctx.beginPath();
   ctx.moveTo(T.m.left, T.m.top);
   ctx.lineTo(T.m.left, ch - T.m.bottom);  // y-axis always drawn
-  if (!isTopPanel) {
-    // x-axis only on the bottom (weight) panel
+  if (panelPos !== 'top') {
+    // x-axis on the bottom panel and on solo panels (not on a top panel,
+    // which butts flush against the panel below it)
     ctx.lineTo(cw - T.m.right, ch - T.m.bottom);
   }
   ctx.stroke();
@@ -1732,10 +1838,10 @@ function drawSingleChart(canvasId, measurementMethod, color, cw, ch, isTopPanel,
   ctx.fillText(measurementMethod === 'height' ? 'cm' : 'kg', 0, 0);
   ctx.restore();
 
-  // X AXIS TICKS + LABELS — bottom (weight) panel gets full labels;
-  // top (height) panel gets a minimal age strip at the top margin so at
+  // X AXIS TICKS + LABELS — bottom/solo panels get full labels; a top panel
+  // gets a minimal age strip at the top margin instead (below), so at
   // least one set of age labels is always visible when scrolling tall charts.
-  if (!isTopPanel) {
+  if (panelPos !== 'top') {
     const gridSpec2 = getGridSpec(chartState.range);
 
     ctx.font = `${fontPx(9, s)}px Hind, sans-serif`;
@@ -1775,10 +1881,14 @@ function drawSingleChart(canvasId, measurementMethod, color, cw, ch, isTopPanel,
     ctx.fillText('Age', T.m.left + T.plotW / 2, ch - 2);
   }
 
-  // Height panel (top): minimal age labels at the TOP of the panel.
+  // Top and solo panels: minimal age labels at the TOP of the panel.
   // These sit inside the 20px top margin, rendered small and muted so they
   // don't compete with the chart content. Only major labels (no minor ticks).
-  if (isTopPanel) {
+  // Skipped in Fit-width (paper) mode — the sticky age axis (updateStickyAxis)
+  // sits in normal flow at the top of the page-card whenever the sheet can
+  // overflow the viewport, so it's visible even before any scrolling; drawing
+  // this strip too would duplicate it right above the chart.
+  if (panelPos !== 'bottom' && getZoomMode() !== 'paper') {
     const gridSpec2 = getGridSpec(chartState.range);
     ctx.font = `${fontPx(8, s)}px Hind, sans-serif`;
     ctx.fillStyle = '#000000';
@@ -1834,6 +1944,16 @@ function drawSingleChart(canvasId, measurementMethod, color, cw, ch, isTopPanel,
   canvas._transform = T;
   canvas._ageMin = ageMin;
   canvas._ageMax = ageMax;
+
+  // Publish x-geometry for the sticky age axis (v2.4) — stacked panels write
+  // identical values (same age window/margins/scale), which is harmless.
+  // sqX/sqY: the on-screen pixel size of one paper grid square in each axis —
+  // MUST be equal (true square) in every view and zoom mode; kept here as a
+  // permanent diagnostic of the paper-proportion invariant.
+  const _grid = GRID[chartState.range] || GRID['2-18'];
+  window._axisGeom = { ageMin, ageMax, mLeft: T.m.left, mTop: T.m.top, plotW: T.plotW, plotH: T.plotH, cw, s, range: chartState.range,
+    sqX: T.plotW / ((ageMax - ageMin) / _grid.xYears),
+    sqY: T.plotH / ((valMax - valMin) / getGridUnit(chartState.range, measurementMethod)) };
 }
 
 // Helper: which dataset is best for a given age (for 50th centile label position)
@@ -2036,14 +2156,24 @@ function setZoomMode(mode) {
   saveState();
 }
 
+// Reflect chartState.viewMode on the Combined|Weight|Height buttons. Called
+// on init, restore, newPatient and setViewMode.
+function syncViewButtons() {
+  const mode = chartState.viewMode;
+  const btnCombined = document.getElementById('btnCombined');
+  const btnWeight   = document.getElementById('btnWeight');
+  const btnHeight   = document.getElementById('btnHeight');
+  if (btnCombined) btnCombined.classList.toggle('active', mode === 'combined');
+  if (btnWeight)   btnWeight.classList.toggle('active', mode === 'weight');
+  if (btnHeight)   btnHeight.classList.toggle('active', mode === 'height');
+}
+
 function setViewMode(mode) {
   chartState.viewMode = mode;
-  const btnC = document.getElementById('btnCombined');
-  const btnS = document.getElementById('btnSeparate');
-  if (btnC) btnC.classList.toggle('active', mode === 'combined');
-  if (btnS) btnS.classList.toggle('active', mode === 'separate');
+  syncViewButtons();
   updatePretermToggleVisibility();
   renderBothCharts();
+  if (chartState.htCentileCache) updateLegend(chartState.gestWeeks, chartState.gestDays);
   saveState();
 }
 
@@ -2483,21 +2613,29 @@ function drawCombinedChart(canvasId, range) {
   // ── LEFT AXIS ──────────────────────────────────────────────
   ctx.textAlign = 'right';
   if (dualLabels) {
-    const leftEntries = [];
     // Weight (black) — from data floor up to leftWtMax
+    const leftWtEntries = [];
     for (let wv = Math.ceil(wtMin / STEP_WT) * STEP_WT; wv <= leftWtMax + 0.001; wv = Math.round((wv + STEP_WT) * 1e6) / 1e6) {
       if (wv < 0) continue;
       const py = wtY(wv);
       if (py < m.top - 1 || py > m.top + plotH + 1) continue;
-      leftEntries.push({ py, text: Math.round(wv).toString(), color: '#000000' });
+      leftWtEntries.push({ py, text: Math.round(wv).toString(), color: '#000000' });
     }
     // Height (accent) — labelHtStep increments from first multiple >= leftHtMin
+    const leftHtEntries = [];
     for (let hv = Math.ceil(leftHtMin / labelHtStep) * labelHtStep; hv <= htMax + 0.001; hv += labelHtStep) {
       const py = htY(hv);
       if (py < m.top - 1 || py > m.top + plotH + 1) continue;
-      leftEntries.push({ py, text: Math.round(hv).toString(), color: htLabelColor });
+      leftHtEntries.push({ py, text: Math.round(hv).toString(), color: htLabelColor });
     }
-    drawYGutter(ctx, leftEntries, 'left', leftGutter);
+    drawYGutter(ctx, [...leftWtEntries, ...leftHtEntries], 'left', leftGutter);
+    // Rotated kg/cm unit captions (v2.4) — only where a run has enough
+    // labels to make the caption legible on its own, not floating beside a
+    // single number.
+    drawGutterUnitCaption(ctx, leftWtEntries, 'kg', '#000000', Math.round(10 * s), -1, s);
+    drawGutterUnitCaption(ctx, leftHtEntries, 'cm', htLabelColor, Math.round(10 * s), -1, s);
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.font = `${yFontC}px Hind, sans-serif`;
   } else {
     // Fallback: height only
     const leftEntries = [];
@@ -2518,21 +2656,26 @@ function drawCombinedChart(canvasId, range) {
   // ── RIGHT AXIS ─────────────────────────────────────────────
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
   if (dualLabels) {
-    const rightEntries = [];
     // Weight (black) — from data floor up to rightWtMax
+    const rightWtEntries = [];
     for (let wv = Math.ceil(wtMin / STEP_WT) * STEP_WT; wv <= rightWtMax + 0.001; wv = Math.round((wv + STEP_WT) * 1e6) / 1e6) {
       if (wv < 0) continue;
       const py = wtY(wv);
       if (py < m.top - 1 || py > m.top + plotH + 1) continue;
-      rightEntries.push({ py, text: Math.round(wv).toString(), color: '#000000' });
+      rightWtEntries.push({ py, text: Math.round(wv).toString(), color: '#000000' });
     }
     // Height (accent) — labelHtStep increments from first multiple >= rightHtMin
+    const rightHtEntries = [];
     for (let hv = Math.ceil(rightHtMin / labelHtStep) * labelHtStep; hv <= htMax + 0.001; hv += labelHtStep) {
       const py = htY(hv);
       if (py < m.top - 1 || py > m.top + plotH + 1) continue;
-      rightEntries.push({ py, text: Math.round(hv).toString(), color: htLabelColor });
+      rightHtEntries.push({ py, text: Math.round(hv).toString(), color: htLabelColor });
     }
-    drawYGutter(ctx, rightEntries, 'right', rightGutter);
+    drawYGutter(ctx, [...rightWtEntries, ...rightHtEntries], 'right', rightGutter);
+    drawGutterUnitCaption(ctx, rightWtEntries, 'kg', '#000000', actualCw - Math.round(10 * s), 1, s);
+    drawGutterUnitCaption(ctx, rightHtEntries, 'cm', htLabelColor, actualCw - Math.round(10 * s), 1, s);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.font = `${yFontC}px Hind, sans-serif`;
   } else {
     // Fallback: weight only
     const rightEntries = [];
@@ -2579,12 +2722,86 @@ function drawCombinedChart(canvasId, range) {
 
 
   // ── TOP-MARGIN AGE LABELS (small, muted — matches separate view) ─
-  ctx.font = `${fontPx(8, s)}px Hind, sans-serif`; ctx.fillStyle = '#000000';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-  const topLabelY = m.top - Math.round(3 * s);
-  for (const e of layoutXLabels(ctx, gridSpec, xPx, m.left - 1, m.left + plotW + 1, s)) {
-    ctx.fillText(e.label, e.x, topLabelY);
+  // Skipped in Fit-width (paper) mode — see the matching comment in
+  // drawSingleChart; the sticky age axis covers this exact purpose there.
+  if (getZoomMode() !== 'paper') {
+    ctx.font = `${fontPx(8, s)}px Hind, sans-serif`; ctx.fillStyle = '#000000';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    const topLabelY = m.top - Math.round(3 * s);
+    for (const e of layoutXLabels(ctx, gridSpec, xPx, m.left - 1, m.left + plotW + 1, s)) {
+      ctx.fillText(e.label, e.x, topLabelY);
+    }
   }
+
+  // Publish x-geometry for the sticky age axis (v2.4). sqX/sqY: pixel size of
+  // one paper grid square per axis — must always be equal (see drawSingleChart).
+  window._axisGeom = { ageMin, ageMax, mLeft: m.left, mTop: m.top, plotW, plotH, cw: actualCw, s, range,
+    sqX: plotW / xSq, sqY: pxPerCm * STEP_HT };
+}
+
+// Sticky top age axis (v2.4) — a frozen pane so the age axis stays visible
+// while a tall Fit-width sheet scrolls past. Reads the geometry the main
+// renderer just published to window._axisGeom (same age window / transform /
+// scale as the canvas(es) currently on screen) and draws an identical age
+// strip into a small sticky canvas that sits above .charts-stack inside the
+// page card. Only shown when it's actually needed: Fit-width mode AND the
+// chart taller than the viewport (fit mode always shows the whole chart, and
+// short solo panels never need it — the in-canvas top strip covers those).
+function updateStickyAxis() {
+  const wrap = document.getElementById('stickyAxis');
+  const canvas = document.getElementById('stickyAxisCanvas');
+  const g = window._axisGeom;
+  if (!wrap || !canvas || !g) { if (wrap) wrap.style.display = 'none'; return; }
+
+  const htCanvas = document.getElementById('htCanvas');
+  const wtBlock = document.getElementById('wtBlock');
+  const totalH = (htCanvas ? htCanvas.clientHeight : 0) +
+    ((wtBlock && wtBlock.style.display !== 'none' && document.getElementById('wtCanvas'))
+      ? document.getElementById('wtCanvas').clientHeight : 0);
+  const show = getZoomMode() === 'paper' && totalH > getViewportBudget();
+  wrap.style.display = show ? 'block' : 'none';
+  if (!show) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const stripH = Math.round(22 * g.s);
+  canvas.width  = g.cw * dpr;
+  canvas.height = stripH * dpr;
+  canvas.style.width  = g.cw + 'px';
+  canvas.style.height = stripH + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, g.cw, stripH);
+
+  const xFn = (age) => g.mLeft + (age - g.ageMin) / (g.ageMax - g.ageMin) * g.plotW;
+  const gridSpec = getGridSpec(g.range);
+  const fPx = fontPx(8, g.s);
+  ctx.font = `${fPx}px Hind, sans-serif`;
+  ctx.strokeStyle = '#d9d9d9'; ctx.lineWidth = 0.8;
+  const tickLen = Math.round(3 * g.s);
+  for (const gr of [...gridSpec.majorGrid, ...gridSpec.pipOnly]) {
+    const px = xFn(gr.age);
+    if (px < g.mLeft - 1 || px > g.mLeft + g.plotW + 1) continue;
+    ctx.beginPath();
+    ctx.moveTo(px, stripH - tickLen);
+    ctx.lineTo(px, stripH);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#000000';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  for (const e of layoutXLabels(ctx, gridSpec, xFn, g.mLeft - 1, g.mLeft + g.plotW + 1, g.s)) {
+    ctx.fillText(e.label, e.x, stripH - tickLen - 2);
+  }
+
+  // Keep the strip in sync with .charts-stack's horizontal scroll (attached
+  // once; harmless to call repeatedly).
+  const stack = document.getElementById('chartsStack');
+  if (stack && !stack._stickyAxisSyncAttached) {
+    stack._stickyAxisSyncAttached = true;
+    stack.addEventListener('scroll', () => {
+      canvas.style.transform = `translateX(${-stack.scrollLeft}px)`;
+    }, { passive: true });
+  }
+  if (stack) canvas.style.transform = `translateX(${-stack.scrollLeft}px)`;
 }
 
 // Draw both charts
@@ -2593,9 +2810,12 @@ function renderBothCharts() {
   applySexTheme(chartState.sex);
 
   const sexLabel = chartState.sex === 'male' ? 'BOYS' : 'GIRLS';
+  const modeSuffix = chartState.viewMode === 'weight' ? ' — Weight'
+    : chartState.viewMode === 'height' ? ' — Height'
+    : '';
   const titleEl = document.getElementById('unifiedTitle');
   if (titleEl) titleEl.innerHTML =
-    `<span class="title-sex">${sexLabel}</span> UK-WHO Growth Chart`;
+    `<span class="title-sex">${sexLabel}</span> UK-WHO Growth Chart${modeSuffix}`;
 
   const { ageMin, ageMax } = getVisibleWindow();
   const ageRange = ageMax - ageMin;
@@ -2620,21 +2840,57 @@ function renderBothCharts() {
   // ─────────────────────────────────────────────────────────────────────────
   const grid = GRID[chartState.range] || GRID['2-18'];
 
+  // Dataset filter matches drawSingleChart — the y-range must be sized for
+  // exactly the centile lines that will be drawn, or panels size differently
+  // from what's shown. Shared by every route below.
+  const dsFilter = chartState.range === 'preterm'
+    ? (ds => ds === 'uk90_preterm')
+    : (chartState.range === '0-1' && !chartState.showPreterm
+        ? (ds => ds !== 'uk90_preterm')
+        : null);
+
+  // Number of x-axis grid squares spanning the visible age window
+  const xSquaresInView = ageRange / grid.xYears;
+
   // ── ROUTE ─────────────────────────────────────────────────────────────────
   // Combined view sizes itself (own envelope + fit inside drawCombinedChart) —
-  // route to it before the separate-view sizing below, which it never reads.
+  // route to it before the solo/stacked sizing below, which it never reads.
   const wtBlock = document.getElementById('wtBlock');
   const useCombined = chartState.viewMode === 'combined' && (chartState.range in COMBINED_CHART_CONFIG);
   if (useCombined) {
     drawCombinedChart('htCanvas', chartState.range);
     if (wtBlock) wtBlock.style.display = 'none';
     setupTooltip('htCanvas');
+    updateStickyAxis();
     return;
   }
-  if (wtBlock) wtBlock.style.display = '';
 
-  // Number of x-axis grid squares spanning the visible age window
-  const xSquaresInView = ageRange / grid.xYears;
+  // Weight/Height: a single solo panel (landscape-shaped — fits a desktop
+  // viewport at paper pitch with no vertical scroll on most ranges). Renders
+  // into htCanvas regardless of method, same convention combined view uses.
+  if (chartState.viewMode === 'weight' || chartState.viewMode === 'height') {
+    const method = chartState.viewMode;
+    const cache = method === 'height' ? chartState.htCentileCache : chartState.wtCentileCache;
+    const meas  = method === 'height' ? chartState.htMeasurements  : chartState.wtMeasurements;
+    const snap  = getYSnapUnit(chartState.range, method);
+    const yr = computeYRange(cache, meas, ageMin, ageMax, 'solo', snap, dsFilter);
+    const valueRange = yr ? yr.valMax - yr.valMin : (method === 'height' ? 100 : 50);
+    const gridUnit = getGridUnit(chartState.range, method);
+    const ySq = valueRange / gridUnit;
+    const { pxSq, s, margins } = fitSquareAndScale(xSquaresInView, ySq, [CHART_MARGINS]);
+    const cw = Math.round(pxSq * xSquaresInView + margins[0].left + margins[0].right);
+    const ch = Math.round(ySq * pxSq + margins[0].top + margins[0].bottom);
+    const color = method === 'height'
+      ? (chartState.sex === 'female' ? '#9dc955' : '#81c320')
+      : (chartState.sex === 'female' ? '#559dc9' : '#c32081');
+    drawSingleChart('htCanvas', method, color, cw, ch, 'solo', s);
+    if (wtBlock) wtBlock.style.display = 'none';
+    setupTooltip('htCanvas');
+    updateStickyAxis();
+    return;
+  }
+
+  if (wtBlock) wtBlock.style.display = '';
 
   // ── Y RANGES ──────────────────────────────────────────────────────────────
   // Snap valMin/valMax to multiples of the major-gridline step from Y_GRID_SPEC.
@@ -2643,21 +2899,13 @@ function renderBothCharts() {
   // many on-screen pixels one unit of measurement takes up.
   const htSnap = getYSnapUnit(chartState.range, 'height');
   const wtSnap = getYSnapUnit(chartState.range, 'weight');
-  // Dataset filter matches drawSingleChart — the y-range must be sized for
-  // exactly the centile lines that will be drawn, or panels size differently
-  // from what's shown.
-  const dsFilter = chartState.range === 'preterm'
-    ? (ds => ds === 'uk90_preterm')
-    : (chartState.range === '0-1' && !chartState.showPreterm
-        ? (ds => ds !== 'uk90_preterm')
-        : null);
   const htYRange = computeYRange(
     chartState.htCentileCache, chartState.htMeasurements,
-    ageMin, ageMax, true, htSnap, dsFilter
+    ageMin, ageMax, 'top', htSnap, dsFilter
   );
   const wtYRange = computeYRange(
     chartState.wtCentileCache, chartState.wtMeasurements,
-    ageMin, ageMax, false, wtSnap, dsFilter
+    ageMin, ageMax, 'bottom', wtSnap, dsFilter
   );
 
   // ── GRID-SQUARE FIT (v2.2) ────────────────────────────────────────────────
@@ -2685,21 +2933,24 @@ function renderBothCharts() {
   const htCh = Math.round(htPlotH + topMargins.top + topMargins.bottom);
   const wtCh = Math.round(wtPlotH + botMargins.top + botMargins.bottom);
 
-  // Separate view: two stacked panels
-  drawSingleChart('htCanvas', 'height', chartState.sex === 'female' ? '#9dc955' : '#81c320', cw, htCh, true, s);
-  drawSingleChart('wtCanvas', 'weight', chartState.sex === 'female' ? '#559dc9' : '#c32081', cw, wtCh, false, s);
+  // Combined-fallback ranges (preterm, 2-18y): two stacked panels
+  drawSingleChart('htCanvas', 'height', chartState.sex === 'female' ? '#9dc955' : '#81c320', cw, htCh, 'top', s);
+  drawSingleChart('wtCanvas', 'weight', chartState.sex === 'female' ? '#559dc9' : '#c32081', cw, wtCh, 'bottom', s);
   setupTooltip('htCanvas');
   setupTooltip('wtCanvas');
+  updateStickyAxis();
 }
 
 // ============================================================
 // CHART CONTROLS: range toggle and zoom mode
 // ============================================================
-// The "+ Preterm" toggle only has an effect on the 0-1y SEPARATE view
-// (drawSingleChart extends the x-axis to -0.33y; drawCombinedChart pins
-// ageMin at 0 via COMBINED_CHART_CONFIG). Show it only where it works.
+// The "+ Preterm" toggle only has an effect on the 0-1y Weight/Height solo
+// views and the (rare) stacked fallback — never on Combined (drawSingleChart
+// extends the x-axis to -0.33y; drawCombinedChart pins ageMin at 0 via
+// COMBINED_CHART_CONFIG). Show it only where it works — i.e. hidden only in
+// combined view.
 function updatePretermToggleVisibility() {
-  const show = chartState.range === '0-1' && chartState.viewMode === 'separate';
+  const show = chartState.range === '0-1' && chartState.viewMode !== 'combined';
   const pretSep   = document.getElementById('pretSep');
   const pretGroup = document.getElementById('pretGroup');
   if (pretSep)   pretSep.style.display   = show ? '' : 'none';
@@ -3025,14 +3276,33 @@ function plotCharts(preserveRange) {
   renderBothCharts();
   updateLegend(gestWeeks, gestDays);
   renderResults(processed, gestWeeks, gestDays);
+  placeResultsPanel();
+}
+
+// Dock the results panel in the sidebar on desktop (always visible alongside
+// the measurement rows) or below the chart on phones (v2.4) — a single DOM
+// node moved between two empty anchors, so renderResults keeps working
+// unchanged regardless of where it currently lives.
+function placeResultsPanel() {
+  const panel = document.getElementById('resultsPanel');
+  const sidebarAnchor = document.getElementById('resultsDock');
+  const chartAnchor   = document.getElementById('resultsDockChart');
+  if (!panel || !sidebarAnchor || !chartAnchor) return;
+  const target = isSingleColumn() ? chartAnchor : sidebarAnchor;
+  if (panel.parentElement !== target) target.appendChild(panel);
+  const chartsVisible = document.getElementById('chartsContainer').style.display !== 'none';
+  const hasResults = !!document.getElementById('resultsBody').innerHTML;
+  panel.style.display = (chartsVisible && hasResults) ? '' : 'none';
 }
 
 function updateLegend(gestWeeks, gestDays) {
   const el = document.getElementById('sharedLegend');
   const isPreterm = gestWeeks < 37;
-  let html = `
-    <div class="legend-item"><span class="legend-dot" style="background:${chartState.sex === 'female' ? '#9dc955' : '#81c320'}"></span>Height</div>
-    <div class="legend-item"><span class="legend-dot" style="background:${chartState.sex === 'female' ? '#559dc9' : '#c32081'}"></span>Weight</div>`;
+  const showHeight = chartState.viewMode !== 'weight';
+  const showWeight = chartState.viewMode !== 'height';
+  let html = '';
+  if (showHeight) html += `<div class="legend-item"><span class="legend-dot" style="background:${chartState.sex === 'female' ? '#9dc955' : '#81c320'}"></span>Height</div>`;
+  if (showWeight) html += `<div class="legend-item"><span class="legend-dot" style="background:${chartState.sex === 'female' ? '#559dc9' : '#c32081'}"></span>Weight</div>`;
   if (isPreterm) {
     html += `<div class="legend-item"><span class="legend-cross">✕</span>Corrected age</div>`;
   }
@@ -3128,7 +3398,12 @@ function loadState() {
 
     // Restore chart state
     if (state.chartRange)  chartState.range       = state.chartRange;
-    if (state.viewMode === 'combined' || state.viewMode === 'separate') chartState.viewMode = state.viewMode;
+    // v2.4: 'separate' (both stacked panels) is no longer a user-facing
+    // option — migrate any persisted value to 'combined' (which renders
+    // identically to the old 'separate' on preterm/2-18y, the only ranges
+    // where combined falls back to the stacked layout).
+    if (state.viewMode === 'separate') chartState.viewMode = 'combined';
+    else if (['combined', 'weight', 'height'].includes(state.viewMode)) chartState.viewMode = state.viewMode;
     if (state.zoomMode === 'paper' || state.zoomMode === 'fit') chartState.zoomMode = state.zoomMode;
     if (state.showPreterm !== undefined) chartState.showPreterm = state.showPreterm;
 
@@ -3141,10 +3416,7 @@ function loadState() {
     const rangeActiveEl = document.getElementById(rangeActiveId);
     if (rangeActiveEl) rangeActiveEl.classList.add("active");
     // Sync view mode buttons
-    const btnC = document.getElementById("btnCombined");
-    const btnS = document.getElementById("btnSeparate");
-    if (btnC) btnC.classList.toggle("active", chartState.viewMode === "combined");
-    if (btnS) btnS.classList.toggle("active", chartState.viewMode === "separate");
+    syncViewButtons();
     syncZoomButtons();
     // Restore preterm toggle visibility and state
     updatePretermToggleVisibility();
@@ -3251,14 +3523,12 @@ function newPatient() {
   if (pretBtnNP) { pretBtnNP.classList.remove("active"); pretBtnNP.textContent = "+ Preterm"; }
   updatePretermToggleVisibility();
   // Reset view mode buttons
-  const npBtnC = document.getElementById("btnCombined");
-  const npBtnS = document.getElementById("btnSeparate");
-  if (npBtnC) npBtnC.classList.add("active");
-  if (npBtnS) npBtnS.classList.remove("active");
+  syncViewButtons();
   syncZoomButtons();
   // 7. Show empty state, hide charts
   document.getElementById("emptyState").style.display = "block";
   document.getElementById("chartsContainer").style.display = "none";
+  placeResultsPanel(); // hides the panel now that chartsContainer is hidden
 
   // 8. Clear any error alerts and update ghost placeholders
   clearAlerts();
@@ -3423,6 +3693,7 @@ function runTests() {
   attachGhostListeners();
   updateGhostValues();
   syncZoomButtons();
+  placeResultsPanel();
 
   // Apply sex theme from current radio on page load, and re-apply whenever the
   // user toggles between Boy / Girl so the accent switches live.
@@ -3448,6 +3719,7 @@ window.addEventListener('resize', () => {
   clearTimeout(window._resizeTimer);
   window._resizeTimer = setTimeout(() => {
     syncZoomButtons(); // device-default zoom can flip across the 700px breakpoint
+    placeResultsPanel(); // sidebar/below-chart dock can also flip across the breakpoint
     if (document.getElementById('chartsContainer').style.display !== 'none') {
       renderBothCharts();
     }

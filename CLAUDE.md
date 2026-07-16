@@ -8,7 +8,7 @@ PaedPlot is a fully offline, single-file HTML tool for plotting UK-WHO paediatri
 
 ## Current state
 
-**Version:** v2.3-dev (July 2026) — Paper/Fit zoom modes (fixes charts rendering comically small on desktop); v2.2 was the viewport-fit sizing overhaul. Footer/print strings still say v2.2 pending on-device sign-off.
+**Version:** v2.4-dev (July 2026) — document-viewer redesign: fit-width Paper mode (was a fixed 720px sheet, now fills the chart column), page-card/sticky-axis styling, and a three-way Combined | Weight | Height selector replacing Combined/Separate. v2.3 introduced the Paper/Fit zoom modes; v2.2 was the viewport-fit sizing overhaul. Footer/print strings still say v2.2 pending on-device sign-off.
 **Working file:** `src/paedplot.html` (~306KB, ~3400 lines — includes ~90KB embedded Hind WOFF2 font)
 **Validation status:** SDS calculation engine validated against live RCPCH Digital Growth Charts API to ±0.001 SDS across all datasets, boundaries, and extremes (April 2026). See `docs/VALIDATION_RECORD.md`. June 2026 audit confirmed the engine and LMS data are byte-identical to the validated v1.9 build.
 
@@ -34,11 +34,11 @@ paedplot.html
 | Chart state | 1041 | `chartState` object — all mutable UI state |
 | Layout constants | 1059-1110 | Margins, GRID table, MIN/MAX_PX_PER_SQUARE, Y_GRID_SPEC |
 | Geometry helpers | 1112-1218 | getYSnapUnit, getCanvasWidth, makeTransform, getRangeLimits, computeYRange |
-| Separate-view renderer | 1220-1693 | `drawSingleChart` — stacked-panel rendering (~470 lines) |
+| Separate-view renderer | 1220-1693 | `drawSingleChart` — single/stacked-panel rendering, `panelPos: 'top'\|'bottom'\|'solo'` (v2.4 — was a boolean `isTopPanel`) |
 | Grid spec | 1696-1859 | ageLabel, halfYearLabel, weekLabel, getGridSpec (x-axis definitions per range) |
-| View mode | 1861 | setViewMode (Combined/Separate toggle) |
-| Combined-view renderer | 1935-2400 | COMBINED_CHART_CONFIG + `drawCombinedChart` — single canvas, dual y-axes |
-| Panel orchestration | 2402-2515 | `renderBothCharts` — sizing, routes to combined or separate renderer |
+| View mode | 1861 | setViewMode/syncViewButtons (Combined/Weight/Height selector — v2.4, was Combined/Separate) |
+| Combined-view renderer | 1935-2400 | COMBINED_CHART_CONFIG + `drawCombinedChart` — single canvas, dual y-axes, `drawGutterUnitCaption` (v2.4 cm/kg labels) |
+| Panel orchestration | 2402-2515 | `renderBothCharts` — sizing, routes to combined / solo (weight or height) / stacked-fallback renderer; `updateStickyAxis` (v2.4) |
 | Range controls | 2517-2575 | updatePretermToggleVisibility, togglePreterm, setChartRange |
 | Tooltip | 2577-2643 | setupTooltip (once-attached listeners, `canvas._hitAreas`) |
 | Form/data entry | 2645-2757 | addMeasurementRow, getMeasurements, updateGhostValues |
@@ -56,7 +56,7 @@ paedplot.html
   sex: 'male'|'female',
   range: 'preterm'|'0-1'|'1-4'|'2-9'|'9-18'|'2-18',
   showPreterm: boolean,
-  viewMode: 'combined'|'separate',   // v2.0 — default 'combined'
+  viewMode: 'combined'|'weight'|'height', // v2.4 — was 'combined'|'separate' in v2.0-2.3; a persisted 'separate' migrates to 'combined' on load (renders identically on preterm/2-18y, the only ranges where combined falls back to stacked panels)
   zoomMode: 'paper'|'fit'|null,      // v2.3 — null = device default (paper on desktop, fit on phones)
   gestWeeks: number, gestDays: number,
   htCentileCache: { datasetName: [{age, vals[9]}] },
@@ -83,7 +83,11 @@ paedplot.html
 
 One grid square = `pxPerSquare × pxPerSquare` pixels, always truly square. Panel width = `xSquares × pxPerSquare`. Panel height = `ySquares × pxPerSquare`.
 
-**Zoom modes (v2.3, July 2026):** two zoom modes toggled by a Paper|Fit button pair next to Combined/Separate. **Paper** pins the PLOT WIDTH constant across ranges — `pxSq = PAPER_PLOT_WIDTH / xSquares`, where `PAPER_PLOT_WIDTH = 36 × 20 = 720px` is calibrated so the 1-4y chart (36 x-squares) gets 20px (≈5mm-at-96dpi) squares — mirroring the real charts, which all print at the same A4 sheet width with per-chart grid pitch. Ranges with fewer x-squares (2-9y has 14) get proportionally bigger squares and more vertical page scroll. **Fit** is the v2.2 viewport-fit behaviour below. `getZoomMode()` resolves the effective mode: explicit `chartState.zoomMode` if set, else device default — paper on two-column desktop, fit on single-column phones (`isSingleColumn()`, same 700px breakpoint as the CSS). `fitSquareAndScale` short-circuits in paper mode (fixed `s = getUIScale(20) = 1.25`, no fixed-point iteration). `syncZoomButtons()` reflects the effective mode; called on init, restore, newPatient, setZoomMode and resize (the default can flip across the breakpoint). Persisted as `zoomMode` in the session (null = still on device default).
+**Zoom modes (v2.3-v2.4):** two zoom modes toggled by a "Fit width"|"Fit page" button pair (internal ids/state values still `'paper'`/`'fit'` — only the button labels changed in v2.4) next to Combined/Weight/Height. **Fit width** ("paper" internally) fills the chart column width — `sheetW = clamp(availW − margins, SHEET_MIN_WIDTH 432, SHEET_MAX_WIDTH 1080)`, `pxSq = sheetW / xSquares` — mirroring the real charts, which all print at the same A4 sheet width with per-chart grid pitch. Ranges with fewer x-squares (2-9y has 14) get proportionally bigger squares and more vertical page scroll. Since width now depends on the DOM, `fitSquareAndScale`'s paper branch runs the same margins↔scale fixed-point iteration as the fit branch (v2.3 used a fixed constant, `PAPER_PLOT_WIDTH = 720px`, with no iteration needed — superseded because it left dead space on wide columns and didn't grow with the window). **Fit page** ("fit") is the v2.2 viewport-fit behaviour below. `getZoomMode()` resolves the effective mode: explicit `chartState.zoomMode` if set, else device default — paper on two-column desktop, fit on single-column phones (`isSingleColumn()`, same 700px breakpoint as the CSS). `syncZoomButtons()` reflects the effective mode; called on init, restore, newPatient, setZoomMode and resize (the default can flip across the breakpoint). Persisted as `zoomMode` in the session (null = still on device default).
+
+**Document-viewer styling (v2.4, July 2026):** the chart area (`.chart-area`) is styled as a grey "desk" (`--chart-desk`); the chart stack sits inside a `.page-card` — a white/tinted "sheet" (`--page-tint`, subtly sex-tinted like the RCPCH printed stock) with a soft shadow — containing `.charts-stack`, the legend row, and (only when needed) `.sticky-age-axis`. `.chart-area` no longer sets `overflow-y` — the window is the single vertical scroller, which is required for the sticky axis's `position: sticky` to engage (a scroll container that never actually scrolls would prevent it from sticking). The sticky strip (`updateStickyAxis()`) draws a small age-axis canvas that mirrors the main canvas's geometry (published to `window._axisGeom` at the end of `drawCombinedChart`/`drawSingleChart`) and shows only in Fit-width mode when the sheet is taller than `getViewportBudget()`; it tracks `.charts-stack`'s horizontal scroll via a synced CSS transform.
+
+**Results panel docking (v2.4):** `placeResultsPanel()` moves the single `#resultsPanel` DOM node between two empty anchors — `#resultsDock` in the sidebar (desktop/two-column) and `#resultsDockChart` below the chart (phone/single-column) — based on `isSingleColumn()`. Called from init, `plotCharts`, `newPatient`, and the resize handler (the anchor can flip across the 700px breakpoint same as zoom mode).
 
 **Viewport-fit sizing (v2.2 / 'Fit' mode):** `pxPerSquare` is fitted to BOTH container width and viewport height via the shared `fitSquareAndScale(xSquares, ySquares, panels)` helper (used by both renderers; measures the DOM once, iterates the margins↔scale fixed point, returns `{pxSq, s, margins}`) — the whole chart (both stacked panels in separate view; the single canvas in combined view) is visible in one screenful. `getViewportBudget()`: two-column layout subtracts the chart stack's measured document offset from `window.innerHeight` (so wrapped control rows are accounted for); single-column (≤700px) uses `innerHeight − 64` since the user scrolls the chart into view; `CHROME_RESERVE` (150) is only the can't-measure fallback. Floor `MIN_PX_PER_SQUARE = 10` (legibility — when it binds, the chart overflows and scrolls); cap `MAX_PX_PER_SQUARE = 40` (safety only — the height fit is the effective ceiling). A UI scale factor `s = clamp(pxSq/16, 0.8, 1.5)` (`getUIScale`) scales fonts (`fontPx`, 8px floor), margins (`scaleMargins`), ticks, dots and centile line widths so the label-to-grid ratio stays constant. X-axis labels use greedy collision-avoided layout (`layoutXLabels` — priority tags emitted by `getGridSpec` (`pri: 0` = whole years/"Birth") claim space first; ticks always stay); y-axis labels in both views go through the shared `drawYGutter` overlap guard (skipped label = skipped tick). `renderBothCharts` routes to `drawCombinedChart` BEFORE computing any separate-view sizing. Canvases letterbox-centre via `.chart-block canvas { margin: 0 auto }`; `html { scrollbar-gutter: stable }` prevents the render→scrollbar→stale-width feedback loop.
 
@@ -142,7 +146,7 @@ Defined by `getGridSpec(range)` for x-axis and `Y_GRID_SPEC` for y-axis.
 - Definition: `gestWeeks < 37` — applied at FOUR sites: `calcCorrectedAge`, `drawSingleChart`, `updateLegend`, `renderResults`. If modifying threshold, update ALL FOUR.
 - Correction formula: `correction = (40 - gestWeeks - gestDays/7) / 52.18` years, subtracted from decimal age.
 - Dedicated preterm chart (6th range button): 23w-42w gestation, only `uk90_preterm` data. **Separate view only** — no COMBINED_CHART_CONFIG entry.
-- 0-1y preterm toggle: extends left to -0.33y; `uk90_preterm` lines drawn up to age 0 only. **Only works in separate view** — combined 0-1y pins ageMin at 0, so the toggle is hidden in combined view (`updatePretermToggleVisibility`).
+- 0-1y preterm toggle: extends left to -0.33y; `uk90_preterm` lines drawn up to age 0 only. **Hidden only in Combined view** (`updatePretermToggleVisibility`: `show = range === '0-1' && viewMode !== 'combined'`) — combined 0-1y pins ageMin at 0, but the Weight/Height solo views and the rare stacked fallback all go through `drawSingleChart`, so the toggle works there (v2.4 — was "separate view only" when Combined/Separate were the only two options).
 - Auto-range: preterm view auto-activates when earliest measurement corrected age ≤ 2w post-term.
 - Dot semantics differ between views: separate view plots ● at chronological age + ✕ at corrected age (joined by a dashed line) for preterm patients; combined view plots a single dot at corrected age.
 - UK90 has no length/height reference below 25w gestation — `lookupLMS` correctly returns null for length of a 23-24w baby (weight works from 23w).
@@ -162,6 +166,7 @@ Typography: Hind, embedded as three base64 WOFF2 @font-face blocks (weights 300/
 - **Never interpolate across dataset boundaries** (2y, 4y)
 - **Never join plotted measurement dots with lines**
 - **Never emphasise the 50th centile**
+- **Never constrain chart-canvas display size in CSS** (`max-width`, `width`, etc.) — the JS sets `style.width/height` to the exact painted size; any CSS override rescales one axis independently (height stays explicit) and silently destroys the paper-calibrated grid proportions. A canvas wider than its column must scroll (`.charts-stack` `overflow-x: auto`), never shrink. (A global `canvas { max-width: 100% }` did exactly this from v2.2 until it was caught in v2.4 — fit-width sheets overflowed narrow windows and rendered horizontally squashed while fit-page didn't, i.e. "the two zoom modes show different proportions".) `window._axisGeom.sqX/sqY` is a permanent diagnostic: the two must always be equal.
 - **No external dependencies** (offline-only requirement)
 - **Keep docs updated** as edits are made (briefing, explainer, codebase reference)
 - **Paper-chart fidelity** preferred when choosing between design options
@@ -197,7 +202,7 @@ paedplot/
 
 ### Status (June 2026)
 
-Phases 1-2 **done** (combined renderer for 0-1y/1-4y/2-9y/9-18y; preterm and 2-18y stay separate-only). Phase 3 **partial** (tooltip + measurement dots work in combined view; no pinch-to-zoom — zoom/pan was removed entirely in step 1A). Phase 4 **mostly done** (Combined/Separate toggle, persistence, sex theme; print layout still stale). Phases 5-6 not started. Next planned UI change: replace Combined/Separate with a three-way Combined | Weight | Height selector.
+Phases 1-2 **done** (combined renderer for 0-1y/1-4y/2-9y/9-18y; preterm and 2-18y stay stacked-only). Phase 3 **partial** (tooltip + measurement dots work in combined view; no pinch-to-zoom — zoom/pan was removed entirely in step 1A). Phase 4 **done** (Combined/Weight/Height selector — replaced Combined/Separate in v2.4 — persistence, sex theme; print layout still stale). Phases 5-6 not started.
 
 ### Goal
 
@@ -242,6 +247,7 @@ Replace the current two-stacked-canvas model (height panel above, weight panel b
 - Scroll on 1-4y (both views) on narrow phones — the 10px legibility floor binds (accepted trade-off, confirmed July 2026)
 - Combined view plots preterm measurements at corrected age only (no ✕/chronological-dot pair as in separate view) — but the legend still shows "✕ Corrected age" for preterm patients
 - `docs/` briefing, explainer, and CODEBASE_REFERENCE still describe v1.9 — pending a refresh
+- The 0–2 week blank region on the 0-1y chart and the paper-calibrated grid proportions are deliberate, evidence-based design choices from the UK-WHO chart designers (Wright et al., PMC3546314) — the blank region was intended to push clinicians to compare against birthweight directly rather than a smoothed centile, and undersized plotting areas were shown in their workshops to cause measurable reading errors. Both must survive any future restyle.
 
 ## Testing
 
