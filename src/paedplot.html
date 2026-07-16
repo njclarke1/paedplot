@@ -43,13 +43,6 @@
     --heading: #000000;
     --muted: #000000;
 
-    /* v2.4: document-viewer idiom — the chart is a paper "sheet" on a grey
-       "desk". --page-tint is the sheet's background: extremely subtle sex
-       tint, matching the RCPCH printed charts' tinted stock (overridden by
-       body.sex-girls below). */
-    --chart-desk: #f0f2f4;
-    --page-tint: #fbfdff;   /* boys default */
-
     /* Sex-accent defaults to boys (blue) — overridden by body.sex-girls below */
     --accent: #2081c3;
     --accent-hover: #1a6fa8;
@@ -74,7 +67,6 @@
     --accent-light: #f7e6f0;   /* girls accent light */
     --dot-ht: #9dc955;
     --dot-wt: #559dc9;
-    --page-tint: #fffbfd;      /* girls sheet tint */
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -292,8 +284,7 @@
     flex-wrap: wrap;
   }
 
-  /* CHART AREA — the "desk" the paper sheet sits on (v2.4 document-viewer
-     idiom). No overflow-y here: the window is the one vertical scroller
+  /* CHART AREA. No overflow-y here: the window is the one vertical scroller
      (needed for .sticky-age-axis's position:sticky to engage against the
      viewport rather than a container that never actually scrolls).
      min-width: 0 overrides the grid-item default (min-width: auto), which
@@ -302,7 +293,7 @@
      .charts-stack's overflow-x scroll engage. It also keeps getCanvasWidth's
      stack measurement honest (an inflated stack feeds back into sizing). */
   .chart-area {
-    background: var(--chart-desk);
+    background: var(--page-bg);
     padding: 16px;
     min-width: 0;
   }
@@ -367,7 +358,6 @@
     background: #ffffff;
     border: 1px solid var(--border);
     border-radius: 8px;
-    box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 4px 14px rgba(0,0,0,.06);
     overflow: hidden;
   }
   .results-header {
@@ -604,20 +594,18 @@
     letter-spacing: 0.08em;
     margin-right: 0.4em;
   }
-  /* PAGE CARD (v2.4) — the paper "sheet": a white/tinted card with a soft
-     shadow, floating on the grey --chart-desk. Reads as a document in a
-     viewer rather than a plain canvas on a page. */
-  .page-card {
-    background: var(--page-tint);
-    border: 1px solid #cfd4d9;
-    border-radius: 3px;
-    box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 4px 14px rgba(0,0,0,.06);
-    padding: 12px 14px;
-  }
+  /* #pageCard is an unstyled structural wrapper. (The v2.4 white "sheet"
+     card with shadow/padding was dropped July 2026 — user preferred a
+     minimal border with maximum space for the chart.) It still groups the
+     sticky age axis, the chart stack, and the legend, and must NOT become
+     a scroll container or the sticky axis stops engaging. */
   .charts-stack {
     display: flex;
     flex-direction: column;
     gap: 0;
+    background: var(--cream);
+    border: 1px solid var(--border);
+    border-radius: 2px;
     overflow-x: auto;
     overflow-y: hidden;
     touch-action: pan-y;
@@ -630,17 +618,14 @@
      scroll container (the window is the only vertical scroller — see the
      .chart-area comment), so position:sticky engages against the viewport.
      Hidden by default; shown/sized by updateStickyAxis only in Fit-width
-     mode when the sheet overflows the viewport. Bleeds over the card's own
-     padding (negative margin) so it reads as part of the same sheet. */
+     mode when the chart overflows the viewport. */
   .sticky-age-axis {
     display: none;
     position: sticky;
     top: 0;
     z-index: 20;
-    background: var(--page-tint);
+    background: var(--page-bg);
     border-bottom: 1px solid var(--cream-dark);
-    margin: 0 -14px;
-    padding: 0 14px;
   }
   .sticky-age-clip { overflow: hidden; }
   #stickyAxisCanvas { display: block; margin: 0 auto; }
