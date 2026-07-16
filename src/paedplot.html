@@ -295,10 +295,16 @@
   /* CHART AREA — the "desk" the paper sheet sits on (v2.4 document-viewer
      idiom). No overflow-y here: the window is the one vertical scroller
      (needed for .sticky-age-axis's position:sticky to engage against the
-     viewport rather than a container that never actually scrolls). */
+     viewport rather than a container that never actually scrolls).
+     min-width: 0 overrides the grid-item default (min-width: auto), which
+     would otherwise inflate the 1fr column to fit a canvas wider than the
+     viewport — blowing the page open sideways instead of letting
+     .charts-stack's overflow-x scroll engage. It also keeps getCanvasWidth's
+     stack measurement honest (an inflated stack feeds back into sizing). */
   .chart-area {
     background: var(--chart-desk);
     padding: 16px;
+    min-width: 0;
   }
 
   .chart-tabs {
