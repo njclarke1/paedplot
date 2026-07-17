@@ -1,6 +1,6 @@
 # PaedPlot — Technical Explainer
 
-> **⚠️ Historical document** — describes the v1.x architecture and is kept for reference. For the current (v2.x) architecture see `../CLAUDE.md`.
+> **⚠️ Historical document** — describes the v1.x architecture and is kept for reference. For the current (v2.x) architecture see `../../CLAUDE.md`.
 
 **Current version: v1.8**
 **Author: Nick (Paediatric SpR, UHBW)**

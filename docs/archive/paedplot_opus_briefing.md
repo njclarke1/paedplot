@@ -1,6 +1,6 @@
 # PaedPlot — Opus Handoff Briefing
 
-> **⚠️ Historical document** — describes the v1.x architecture and is kept for reference. For the current (v2.x) architecture see `../CLAUDE.md`.
+> **⚠️ Historical document** — describes the v1.x architecture and is kept for reference. For the current (v2.x) architecture see `../../CLAUDE.md`.
 
 **Current version: v1.8 (paedplot_v1.8.html)**
 **Current working file: paedplot.html (~196KB)**

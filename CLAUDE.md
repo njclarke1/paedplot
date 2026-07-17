@@ -182,10 +182,13 @@ paedplot/
 ├── src/
 │   └── paedplot.html             (v2.4 — the working app)
 ├── docs/
-│   ├── paedplot_opus_briefing.md (handoff briefing — STALE, describes v1.x)
-│   ├── paedplot_explainer.md     (technical explainer — STALE, describes v1.x)
-│   ├── CODEBASE_REFERENCE.md     (line-number codebase map — STALE, v1.9 line numbers)
-│   └── VALIDATION_RECORD.md      (RCPCH API validation audit trail)
+│   ├── HOWTO.md                  (editing guide — partially stale, see banner)
+│   ├── VALIDATION_RECORD.md      (RCPCH API validation audit trail)
+│   └── archive/                  (historical docs — v1.x or completed-phase, kept for reference)
+│       ├── paedplot_opus_briefing.md (handoff briefing — STALE, describes v1.x)
+│       ├── paedplot_explainer.md     (technical explainer — STALE, describes v1.x)
+│       ├── CODEBASE_REFERENCE.md     (line-number codebase map — STALE, v1.9 line numbers)
+│       └── v2_PHASE_1_PLAN.md        (v2.0 Phase 1 handoff brief — STALE, phase shipped)
 ├── validation/
 │   ├── validate_paedplot.sh      (Termux/bash script — needs curl+jq, hardcoded v1.5.4 values)
 │   └── validate_paedplot.mjs     (Node ≥18 — no deps, computes PaedPlot SDS live from src; preferred)
@@ -246,7 +249,7 @@ Replace the current two-stacked-canvas model (height panel above, weight panel b
 - Print layout: STALE — `@media print` rules target classes removed in v2.0 (`.chart-panel`, `.chart-tabs`, `.chart-title`, `.print-header`), hides the results panel, and does not hide `.chart-controls`. Needs a dedicated pass.
 - Scroll on 1-4y (both views) on narrow phones — the 10px legibility floor binds (accepted trade-off, confirmed July 2026)
 - Combined view plots preterm measurements at corrected age only (no ✕/chronological-dot pair as in separate view) — but the legend still shows "✕ Corrected age" for preterm patients
-- `docs/` briefing, explainer, and CODEBASE_REFERENCE still describe v1.9 — pending a refresh
+- `docs/archive/` briefing, explainer, and CODEBASE_REFERENCE still describe v1.9 — pending a refresh
 - The 0–2 week blank region on the 0-1y chart and the paper-calibrated grid proportions are deliberate, evidence-based design choices from the UK-WHO chart designers (Wright et al., PMC3546314) — the blank region was intended to push clinicians to compare against birthweight directly rather than a smoothed centile, and undersized plotting areas were shown in their workshops to cause measurable reading errors. Both must survive any future restyle.
 
 ## Testing

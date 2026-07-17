@@ -4,7 +4,7 @@
 
 
 Practical how-tos for common code changes. For full architecture context see
-`paedplot_explainer.md`; for a line-by-line codebase map see `CODEBASE_REFERENCE.md`;
+`archive/paedplot_explainer.md`; for a line-by-line codebase map see `archive/CODEBASE_REFERENCE.md`;
 for Claude Code–specific instructions see `../CLAUDE.md`.
 
 ---

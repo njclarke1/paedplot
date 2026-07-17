@@ -1,6 +1,6 @@
 # PaedPlot Codebase Reference
 
-> **⚠️ Historical document** — line numbers and structure describe the v1.x build. For the current (v2.x) architecture map see `../CLAUDE.md`.
+> **⚠️ Historical document** — line numbers and structure describe the v1.x build. For the current (v2.x) architecture map see `../../CLAUDE.md`.
 
 **Purpose:** token-efficient lookup for Claude across future edit sessions.
 **File:** `paedplot.html` (~184KB, ~2355 lines, single self-contained HTML)

@@ -39,7 +39,7 @@ Full audit trail in `docs/VALIDATION_RECORD.md`. Validation script in `validatio
 
 Single HTML file containing embedded CSS, HTML, JavaScript, and LMS reference data. No build step, no bundler, no framework. The JS calculation engine (~200 lines) is cleanly separated from the rendering engine (~500 lines) and UI layer (~800 lines).
 
-Key design decisions documented in `docs/paedplot_opus_briefing.md`. Full technical explanation in `docs/paedplot_explainer.md`. Line-by-line codebase map in `docs/CODEBASE_REFERENCE.md`. (These three describe the v1.9 architecture and are pending a refresh — the current architecture summary lives in `CLAUDE.md`.)
+Key design decisions documented in `docs/archive/paedplot_opus_briefing.md`. Full technical explanation in `docs/archive/paedplot_explainer.md`. Line-by-line codebase map in `docs/archive/CODEBASE_REFERENCE.md`. (These three describe the v1.9 architecture and are archived pending a refresh — the current architecture summary lives in `CLAUDE.md`.)
 
 ## Version history
 
