@@ -1368,12 +1368,25 @@ function getGridUnit(range, measurementMethod) {
   return measurementMethod === 'height' ? g.htCm : g.wtKg;
 }
 
+// Gridline stroke styles (July 2026) — solid lines matching the printed
+// charts: one light-grey ink at two weights (minor thin, major thick).
+// Replaces the dotted [1,4]/[1,3] rendering used from v1.5.5 to v2.4.
+const GRID_LINE_COLOR = '#d9d9d9';
+function setGridStroke(ctx, tier) { // tier: 'minor' | 'major'
+  ctx.strokeStyle = GRID_LINE_COLOR;
+  ctx.lineWidth = tier === 'major' ? 1.0 : 0.5;
+  ctx.setLineDash([]);
+}
+
 // Y-axis gridline spec per range. null = no minor tier.
-// Major step also drives y-axis grid-snap (panel edges align to major gridlines).
+// Major step also drives y-axis grid-snap (panel edges align to major gridlines)
+// and where ticks + labels go. `thin: true` renders the major-step gridlines at
+// minor weight (paper charts where a section has only fine lines — 0-1y both
+// sections, 1-4y weight section — while keeping labels on the major step).
 const Y_GRID_SPEC = {
   'preterm':{ height: { minor: 1,    major: 2   }, weight: { minor: 0.1,  major: 0.5 } },
-  '0-1':  { height: { minor: null, major: 2   }, weight: { minor: null, major: 0.5 } },
-  '1-4':  { height: { minor: 1,    major: 4   }, weight: { minor: null, major: 1   } },
+  '0-1':  { height: { minor: null, major: 2, thin: true }, weight: { minor: null, major: 0.5, thin: true } },
+  '1-4':  { height: { minor: 1,    major: 4   }, weight: { minor: null, major: 1, thin: true } },
   '2-9':  { height: { minor: 1,    major: 5   }, weight: { minor: 1,    major: 5   } },
   '9-18': { height: { minor: 1,    major: 5   }, weight: { minor: 1,    major: 5   } },
   '2-18': { height: { minor: 1,    major: 5   }, weight: { minor: 1,    major: 5   } },
@@ -1672,14 +1685,11 @@ function drawSingleChart(canvasId, measurementMethod, color, cw, ch, panelPos, s
   ctx.restore();
 
   // GRID LINES — full-height vertical lines, clipped to plot area.
-  // Paper-chart style: fine dotted light-grey (#D3D3D3 with setLineDash([1,4])).
-  // Major lines slightly denser dash pattern for subtle hierarchy.
+  // Paper-chart style: solid light-grey, thin minor / thick major (setGridStroke).
   const gridSpec = getGridSpec(chartState.range);
 
   // Minor grid lines
-  ctx.strokeStyle = '#d9d9d9';
-  ctx.lineWidth = 0.5;
-  ctx.setLineDash([1, 4]);
+  setGridStroke(ctx, 'minor');
   for (const g of gridSpec.minorGrid) {
     if (g.age < ageMin - 0.01 || g.age > ageMax + 0.01) continue;
     const gx = T.x(g.age);
@@ -1689,10 +1699,8 @@ function drawSingleChart(canvasId, measurementMethod, color, cw, ch, panelPos, s
     ctx.stroke();
   }
 
-  // Major grid lines — same colour, slightly heavier weight + denser dash for hierarchy
-  ctx.strokeStyle = '#d9d9d9';
-  ctx.lineWidth = 0.6;
-  ctx.setLineDash([1, 3]);
+  // Major grid lines — same colour, heavier weight for hierarchy
+  setGridStroke(ctx, 'major');
   for (const g of gridSpec.majorGrid) {
     if (g.age < ageMin - 0.01 || g.age > ageMax + 0.01) continue;
     const gx = T.x(g.age);
@@ -1701,7 +1709,6 @@ function drawSingleChart(canvasId, measurementMethod, color, cw, ch, panelPos, s
     ctx.lineTo(gx, ch - T.m.bottom);
     ctx.stroke();
   }
-  ctx.setLineDash([]);
 
   // PLOTTED MEASUREMENTS
   canvas._hitAreas = [];
@@ -1771,14 +1778,12 @@ function drawSingleChart(canvasId, measurementMethod, color, cw, ch, panelPos, s
   // gridlines (see renderBothCharts passing .major into computeYRange).
   const ySpec = getYGridSpec(chartState.range, measurementMethod);
 
-  // Minor y-gridlines first (dotted, no tick, no label)
+  // Minor y-gridlines first (thin, no tick, no label)
   if (ySpec.minor != null && ySpec.minor > 0) {
-    ctx.strokeStyle = '#d9d9d9';
-    ctx.lineWidth = 0.5;
-    ctx.setLineDash([1, 4]);
+    setGridStroke(ctx, 'minor');
     const minorStart = Math.ceil(valMin / ySpec.minor) * ySpec.minor;
     for (let v = minorStart; v <= valMax + 1e-9; v = Math.round((v + ySpec.minor) * 1000) / 1000) {
-      // Skip positions that coincide with major — major will draw over them with denser dash
+      // Skip positions that coincide with major — major will draw over them
       if (Math.abs(v / ySpec.major - Math.round(v / ySpec.major)) < 1e-6) continue;
       const py = T.y(v);
       if (py < T.m.top - 0.5 || py > ch - T.m.bottom + 0.5) continue;
@@ -1787,7 +1792,6 @@ function drawSingleChart(canvasId, measurementMethod, color, cw, ch, panelPos, s
       ctx.lineTo(cw - T.m.right, py);
       ctx.stroke();
     }
-    ctx.setLineDash([]);
   }
 
   // Major y-gridlines + ticks + labels. Gridlines are drawn for every major
@@ -1804,15 +1808,13 @@ function drawSingleChart(canvasId, measurementMethod, color, cw, ch, panelPos, s
   for (let v = majorStart; v <= valMax + 1e-9; v = Math.round((v + majorStep) * 1000) / 1000) {
     const py = T.y(v);
     if (py < T.m.top - 0.5 || py > ch - T.m.bottom + 0.5) continue;
-    // Major gridline through plot — dotted, slightly denser than minor
-    ctx.strokeStyle = '#d9d9d9';
-    ctx.lineWidth = 0.6;
-    ctx.setLineDash([1, 3]);
+    // Major gridline through plot — thick, unless the range/axis is flagged
+    // `thin` (paper sections with only fine lines; labels stay on this step)
+    setGridStroke(ctx, ySpec.thin ? 'minor' : 'major');
     ctx.beginPath();
     ctx.moveTo(T.m.left + 1, py);
     ctx.lineTo(cw - T.m.right, py);
     ctx.stroke();
-    ctx.setLineDash([]);
     yGutterEntries.push({ py, text: v % 1 === 0 ? v.toFixed(0) : v.toFixed(1), color: yLabelColor });
   }
   drawYGutter(ctx, yGutterEntries, 'left', {
@@ -2020,18 +2022,20 @@ function getGridSpec(range) {
     }
 
     case '0-1': {
-      // Major: every 2 weeks — labelled numerically ('2', '4', '6'...)
-      // Pip-only: each whole month — labelled ('Birth', '1m', '2m'...)
+      // Minor: every 2 weeks — thin gridlines, some labelled numerically ('2', '4', '6'...)
+      // Pip-only: tick per biweekly gridline + monthly labels ('Birth', '3m'...)
       // 0-1y axis labels follow clinical vernacular:
       //   preterm:      weeks of gestation (24, 26, 28, 30, 32, 34, 36) — drop 38
       //                 because it sits too close to "Birth" on phone widths
       //   postnatal:    weeks of age (2, 4, 6, 8, 10) — up to 10 weeks
       //   from 3 months: monthly labels (3m, 4m, ..., 11m, 1y)
-      // Gridlines: every 2 weeks across the full range for fine plotting.
+      // Gridlines: every 2 weeks across the full range for fine plotting —
+      // all MINOR weight (the paper 0-1 chart has a uniform fine grid, no
+      // thick lines); ticks + labels ride on pipOnly rows at the same ages.
       // Week 0 (= Birth = 40w gestation) gets the "Birth" label via pipOnly.
       // Weeks -2 (38w) and +12 get labelless gridlines so the vernacular switch
       // is visual: "...36, Birth, 2, 4, 6, 8, 10, 3m, 4m..."
-      const majorGrid = [], pipOnly = [];
+      const minorGrid = [], pipOnly = [];
 
       // Biweekly gridlines from -16w (24w gestation) to +52w (12m postnatal)
       for (let w = -16; w <= 52; w += 2) {
@@ -2046,7 +2050,8 @@ function getGridSpec(range) {
         // w = 0  → no label (Birth comes from pipOnly)
         // w = 12 → no label (transition point; next label is 3m from pipOnly)
         // w >= 14 → no label (monthly labels take over)
-        majorGrid.push({ age, label });
+        minorGrid.push({ age });
+        pipOnly.push({ age, label });                       // tick (+ label where set)
       }
 
       // pipOnly: Birth + monthly labels from 3 months onward.
@@ -2058,7 +2063,7 @@ function getGridSpec(range) {
       }
       pipOnly.push({ age: 1, label: '1y', pri: 0 });
 
-      return { minorGrid: [], majorGrid, pipOnly };
+      return { minorGrid, majorGrid: [], pipOnly };
     }
 
     case '1-4': {
@@ -2097,33 +2102,35 @@ function getGridSpec(range) {
 
     case '9-18': {
       // Minor: every 2 months — gridline only
-      // Major: every 1 year — gridline + label ('9y', '10y'...). No 6-month labels.
+      // Major: every 6 months — thick gridline (same cadence as '2-9'), but
+      // labelled only at whole years ('9y', '10y'...), matching the paper
+      // 2-18 chart. Half-year rows carry label: null (line + tick, no text).
       // Starts at 96 (age 8), one year earlier than the boys' ageMin of 9, so the
       // girls chart (ageMin_F: 8) still gets full gridline coverage for 8-9y —
       // callers filter by their own ageMin/ageMax, same pattern as the '2-9' case.
       const minorGrid = [], majorGrid = [];
       for (let m = 96; m <= 216; m++) {
         const age = m / 12;
-        const isYear = m % 12 === 0;
-        const is2Month = m % 2 === 0;
-        if (isYear) {
+        if (m % 12 === 0) {
           majorGrid.push({ age, label: `${Math.round(age)}y`, pri: 0 });
-        } else if (is2Month) {
+        } else if (m % 6 === 0) {
+          majorGrid.push({ age, label: null });
+        } else if (m % 2 === 0) {
           minorGrid.push({ age });
         }
       }
       return { minorGrid, majorGrid, pipOnly: [] };
     }
 
-    default: { // '2-18' — same structure as 9-18: minor every 2m, major every year
+    default: { // '2-18' — same structure as 9-18: minor 2m, major 6m, labels yearly
       const minorGrid = [], majorGrid = [];
       for (let m = 24; m <= 216; m++) {
         const age = m / 12;
-        const isYear = m % 12 === 0;
-        const is2Month = m % 2 === 0;
-        if (isYear) {
+        if (m % 12 === 0) {
           majorGrid.push({ age, label: `${Math.round(age)}y`, pri: 0 });
-        } else if (is2Month) {
+        } else if (m % 6 === 0) {
+          majorGrid.push({ age, label: null });
+        } else if (m % 2 === 0) {
           minorGrid.push({ age });
         }
       }
@@ -2225,7 +2232,11 @@ function setViewMode(mode) {
 // view is near-facsimile of the paper layout.
 //
 // GRIDLINE BEHAVIOUR
-//   Major horizontal gridlines appear at every STEP_HT cm (= one pxSq interval).
+//   Horizontal gridlines appear at every STEP_HT cm (= one pxSq interval),
+//   drawn THICK only where the cm value is a multiple of HT_MAJOR_EVERY
+//   (paper anchoring — 1-4y: 60, 64, 68…cm, which coincide with whole kg;
+//   2-9y/9-18y: every square). No HT_MAJOR_EVERY → all square lines thin
+//   (0-1y paper has a uniform fine grid with no thick lines).
 //   Minor gridlines (if drawMinors: true) fill within each square at 1cm steps:
 //     for j = 1..(STEP_HT-1): line at py + j * pxPerCm
 //   Weight axis labels appear every STEP_WT kg (ideally a multiple of WT_MAJOR
@@ -2246,10 +2257,12 @@ const COMBINED_CHART_CONFIG = {
   '0-1':  { ageMin: 0,  ageMax: 1,  HT_ANCHOR: 60,  WT_ANCHOR: 13,  STEP_HT: 2, STEP_WT: 1,  drawMinors: false, WT_MAJOR: 0.5,
             LEFT_WT_MAX: 7,  LEFT_HT_MIN: 44, RIGHT_WT_MAX: 13.5, RIGHT_HT_MIN: 64,  LABEL_HT_STEP: 2 },
   '1-4':  { ageMin: 1,  ageMax: 4,  HT_ANCHOR: 84,  WT_ANCHOR: 23,  STEP_HT: 2, STEP_WT: 2,  drawMinors: true,  WT_MAJOR: 0.5,
+            HT_MAJOR_EVERY: 4,
             LEFT_WT_MAX: 14, LEFT_HT_MIN: 64, RIGHT_WT_MAX: 25,   RIGHT_HT_MIN: 88,  LABEL_HT_STEP: 4 },
   '2-9':  { ageMin: 2,  ageMax: 9,  ageMax_F: 8,  HT_ANCHOR: 100, WT_ANCHOR: 50,  HT_ANCHOR_F: 95,  WT_ANCHOR_F: 45,  STEP_HT: 5, STEP_WT: 5,  drawMinors: true,  WT_MAJOR: 5,
+            HT_MAJOR_EVERY: 5,
             LEFT_WT_MAX: 20, LEFT_HT_MIN: 75, RIGHT_WT_MAX: 50,   RIGHT_HT_MIN: 105, LABEL_HT_STEP: 5 },
-  '9-18': { ageMin: 9,  ageMax: 18, ageMin_F: 8,  HT_ANCHOR: 125, WT_ANCHOR: 100, HT_ANCHOR_F: 125, WT_ANCHOR_F: 90,  STEP_HT: 5, STEP_WT: 5,  drawMinors: true,  WT_MAJOR: 5,
+  '9-18': { ageMin: 9,  ageMax: 18, ageMin_F: 8,  HT_ANCHOR: 125, WT_ANCHOR: 100, HT_ANCHOR_F: 125, WT_ANCHOR_F: 90,  STEP_HT: 5, STEP_WT: 5,  drawMinors: true,  WT_MAJOR: 5, HT_MAJOR_EVERY: 5,
             // The anchors put weight's data ceiling (100/90kg) on the same row as
             // height's data floor (125cm) ON PURPOSE — that vertical offset is what
             // keeps the two centile bands separated (height band above, weight band
@@ -2398,36 +2411,39 @@ function drawCombinedChart(canvasId, range) {
   ctx.clip();
 
   // ── SHARED HORIZONTAL GRIDLINES ──────────────────────────────
-  // Major every pxSq (= STEP_HT units). Minor every pxPerUnit if drawMinors.
+  // Square lines every pxSq (= STEP_HT cm ≡ WT_MAJOR kg); thick only where the
+  // cm value is a multiple of HT_MAJOR_EVERY (absent → all thin, e.g. 0-1y).
+  // Minor 1cm lines within each square if drawMinors.
+  const htMajorEvery = cfg.HT_MAJOR_EVERY ?? null;
   for (let sq = 0; sq <= totalSq; sq++) {
     const py = m.top + sq * pxSq;
     if (drawMinors && sq < totalSq) {
-      ctx.strokeStyle = '#d9d9d9'; ctx.lineWidth = 0.5; ctx.setLineDash([1, 4]);
+      setGridStroke(ctx, 'minor');
       for (let j = 1; j < STEP_HT; j++) {
         const mpy = py + j * pxPerCm;
         ctx.beginPath(); ctx.moveTo(m.left, mpy); ctx.lineTo(m.left + plotW, mpy); ctx.stroke();
       }
     }
-    ctx.strokeStyle = '#d9d9d9'; ctx.lineWidth = 0.6; ctx.setLineDash([1, 3]);
+    const cmVal = HT_ANCHOR + (sqAbove - sq) * STEP_HT;
+    const isMajorRow = htMajorEvery != null && Math.abs(cmVal % htMajorEvery) < 1e-6;
+    setGridStroke(ctx, isMajorRow ? 'major' : 'minor');
     ctx.beginPath(); ctx.moveTo(m.left, py); ctx.lineTo(m.left + plotW, py); ctx.stroke();
   }
-  ctx.setLineDash([]);
 
   // ── SHARED VERTICAL GRIDLINES ────────────────────────────────
   const gridSpec = getGridSpec(range);
-  ctx.strokeStyle = '#d9d9d9'; ctx.lineWidth = 0.5; ctx.setLineDash([1, 4]);
+  setGridStroke(ctx, 'minor');
   for (const g of gridSpec.minorGrid) {
     if (g.age < ageMin - 0.01 || g.age > ageMax + 0.01) continue;
     const gx = xPx(g.age);
     ctx.beginPath(); ctx.moveTo(gx, m.top); ctx.lineTo(gx, m.top + plotH); ctx.stroke();
   }
-  ctx.strokeStyle = '#d9d9d9'; ctx.lineWidth = 0.6; ctx.setLineDash([1, 3]);
+  setGridStroke(ctx, 'major');
   for (const g of gridSpec.majorGrid) {
     if (g.age < ageMin - 0.01 || g.age > ageMax + 0.01) continue;
     const gx = xPx(g.age);
     ctx.beginPath(); ctx.moveTo(gx, m.top); ctx.lineTo(gx, m.top + plotH); ctx.stroke();
   }
-  ctx.setLineDash([]);
 
   // ── CENTILE LINES ────────────────────────────────────────────
   const TWO_WEEKS = 2 / 52.18;

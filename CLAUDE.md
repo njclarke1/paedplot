@@ -130,7 +130,7 @@ One grid square = `pxPerSquare × pxPerSquare` pixels, always truly square. Pane
 - Colour: sex-specific accent — `#0081c7` (boys), `#e7459a` (girls) — v2.1 palette; both height and weight centile sets use the accent in the combined view too
 - Centile labels (suffix-stripped, e.g. "50") drawn on the line at both left and right plot edges with a white halo; 'height'/'weight' watermark at 25% alpha on the 50th centile
 
-### Axis gridline model (v1.5.5 / v1.6)
+### Axis gridline model (v1.5.5 / v1.6; solid restyle July 2026)
 
 Three independent tiers per axis:
 - `minorGrid`: gridline through plot only (no tick, no label)
@@ -138,6 +138,12 @@ Three independent tiers per axis:
 - `pipOnly`: tick + label on axis strip only (no gridline through plot)
 
 Defined by `getGridSpec(range)` for x-axis and `Y_GRID_SPEC` for y-axis.
+
+Gridlines are SOLID (July 2026, replacing the dotted [1,4]/[1,3] look): one light grey (`GRID_LINE_COLOR` #d9d9d9), two weights via `setGridStroke(ctx, 'minor'|'major')` — 0.5px thin, 1.0px thick. Paper-matched interval/weight rules:
+- 0-1y: ALL lines thin (uniform fine grid like the paper chart) — x rows live in `minorGrid` with ticks/labels on matching `pipOnly` rows; y via `thin: true` in `Y_GRID_SPEC` (renders major-step lines at minor weight, labels unaffected)
+- 1-4y: x thin monthly / thick 6-monthly; y thin 1cm, thick 4cm (multiples of 4 — coincide with whole kg in combined view); solo-weight view thin 1kg (`thin: true`)
+- 2-9y / 9-18y / 2-18y: x thin 2-monthly / thick 6-monthly (9-18/2-18 half-year rows are `label: null` majors — thick line + tick, labels stay yearly); y thin 1cm/1kg, thick 5cm/5kg
+- Combined view horizontal lines: thick only where the cm value is a multiple of `HT_MAJOR_EVERY` in COMBINED_CHART_CONFIG (absent on '0-1' → all thin)
 
 0-1y x-axis uses clinical vernacular: gestational weeks on preterm side (24, 26, 28, 30, 32, 34, 36), postnatal weeks (2, 4, 6, 8, 10), then months from 3m onward (3m, 4m, ..., 11m, 1y). Birth pivot at 40w gestation.
 
