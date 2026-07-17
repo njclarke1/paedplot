@@ -8,7 +8,7 @@ PaedPlot is a fully offline, single-file HTML tool for plotting UK-WHO paediatri
 
 ## Current state
 
-**Version:** v2.4-dev (July 2026) — document-viewer redesign: fit-width Paper mode (was a fixed 720px sheet, now fills the chart column), page-card/sticky-axis styling, and a three-way Combined | Weight | Height selector replacing Combined/Separate. v2.3 introduced the Paper/Fit zoom modes; v2.2 was the viewport-fit sizing overhaul. Footer/print strings still say v2.2 pending on-device sign-off.
+**Version:** v2.4 (July 2026) — document-viewer redesign: fit-width Paper mode (was a fixed 720px sheet, now fills the chart column), page-card/sticky-axis styling, and a three-way Combined | Weight | Height selector replacing Combined/Separate. v2.3 introduced the Paper/Fit zoom modes; v2.2 was the viewport-fit sizing overhaul. Footer/print strings updated to v2.4 (July 2026, for the public GitHub Pages preview) — on-device sign-off still pending; no `versions/paedplot_v2.4.html` snapshot has been cut yet.
 **Working file:** `src/paedplot.html` (~306KB, ~3400 lines — includes ~90KB embedded Hind WOFF2 font)
 **Validation status:** SDS calculation engine validated against live RCPCH Digital Growth Charts API to ±0.001 SDS across all datasets, boundaries, and extremes (April 2026). See `docs/VALIDATION_RECORD.md`. June 2026 audit confirmed the engine and LMS data are byte-identical to the validated v1.9 build.
 
@@ -180,7 +180,7 @@ paedplot/
 ├── README.md                     (project README)
 ├── .gitignore
 ├── src/
-│   └── paedplot.html             (v2.1 — the working app)
+│   └── paedplot.html             (v2.4 — the working app)
 ├── docs/
 │   ├── paedplot_opus_briefing.md (handoff briefing — STALE, describes v1.x)
 │   ├── paedplot_explainer.md     (technical explainer — STALE, describes v1.x)

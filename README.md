@@ -45,7 +45,7 @@ Key design decisions documented in `docs/paedplot_opus_briefing.md`. Full techni
 
 | Version | Summary |
 |---|---|
-| v2.4-dev | Document-viewer layout: fit-width Paper mode, Combined/Weight/Height selector, sticky age axis, results-panel docking (current `src/paedplot.html`) |
+| v2.4 | Document-viewer layout: fit-width Paper mode, Combined/Weight/Height selector, sticky age axis, results-panel docking (current `src/paedplot.html`) |
 | v2.3 | Fit width / Fit page zoom modes; grid proportions recalibrated against the printed RCPCH charts |
 | v2.2 | Viewport-fit chart sizing — whole chart visible in one screenful across screen sizes |
 | v2.1 | Embedded Hind font, new boys/girls palette, table styling; audit fixes (range persistence, preterm toggle visibility, edge-label filtering) |
