@@ -610,7 +610,12 @@
     border-radius: 2px;
     overflow-x: auto;
     overflow-y: hidden;
-    touch-action: pan-y;
+    /* Both pan axes for touch (July 2026 — was pan-y only, a v1.9-era rule
+       from before charts could overflow sideways; it silently blocked touch
+       panning of zoomed/fit-width charts while mouse scrolling worked fine).
+       Deliberately NOT `auto`: pinch-zoom stays disabled on the chart so the
+       browser's pinch can't fight the app's 1×/2×/3× re-render zoom. */
+    touch-action: pan-x pan-y;
     /* Smooth crossfade on range switch */
     transition: opacity 0.15s ease-out;
   }
