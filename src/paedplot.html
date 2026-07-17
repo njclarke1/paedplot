@@ -3096,6 +3096,10 @@ function updateStickyYAxis() {
   const labelExt = (g && g.cy) ? Math.round(30 * g.s) : 0;
   const totalH = Math.round(stack.clientHeight);
   wrap.style.top = stack.offsetTop + 'px';
+  // The wrap stays gutter-width so its .scrolled box-shadow sits on the
+  // frozen gutter's edge; the wider label canvas simply overflows it
+  // (transparent strip — a shadow there would read as a stray line).
+  wrap.style.width = gw + 'px';
   canvas.width = Math.round((gw + labelExt) * dpr);
   canvas.height = Math.round(totalH * dpr);
   canvas.style.width = (gw + labelExt) + 'px';
