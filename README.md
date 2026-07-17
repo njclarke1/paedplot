@@ -14,8 +14,9 @@ Embeds the full UK90/WHO LMS reference dataset (~105KB) with zero external depen
 - **Gestational correction** for preterm infants (<37 weeks) using UK/RCPCH convention
 - **Dedicated preterm chart** (23–42w gestation) with auto-selection for preterm patients
 - **Clinical vernacular axis labels** — gestational weeks → postnatal weeks → months, matching how paediatricians talk about infant age
-- **Paper-chart-style rendering** — dotted gridlines, dashed/solid centile pattern, cream background, birth centile markers with blank 0–2w region
-- **Touch-friendly mobile design** — built for use between clinic appointments on a phone
+- **Paper-chart-style rendering** — solid light-grey gridlines with the printed charts' thick/thin hierarchy and per-range intervals, dashed/solid centile pattern, birth centile markers with blank 0–2w region, grid proportions calibrated against the RCPCH chart PDFs (one grid square is always a true pixel square)
+- **Touch-friendly mobile design** — on phones the chart fills the screen width exactly, with a **1×/2×/3× zoom** (sharp re-render at an exact multiple of the grid, never blurry scaling) for interrogating growth trends on a small screen; sticky age and kg/cm axes stay visible while panning, and a floating thumb-reachable zoom control follows you down the chart
+- **Fit width / Fit page viewing modes** on desktop — fill the window like a PDF viewer, or shrink the whole chart into one screenful
 - **Session persistence** via localStorage — data survives page refresh
 - **Zero dependencies, zero network, zero install** — download one HTML file and open it
 
@@ -37,7 +38,7 @@ Full audit trail in `docs/VALIDATION_RECORD.md`. Validation script in `validatio
 
 ## Architecture
 
-Single HTML file containing embedded CSS, HTML, JavaScript, and LMS reference data. No build step, no bundler, no framework. The JS calculation engine (~200 lines) is cleanly separated from the rendering engine (~500 lines) and UI layer (~800 lines).
+Single HTML file containing embedded CSS, HTML, JavaScript, and LMS reference data (plus the Hind typeface as base64 WOFF2). No build step, no bundler, no framework. The JS calculation engine (~200 lines, unchanged since validation) is cleanly separated from the canvas rendering engine and UI layer.
 
 Key design decisions documented in `docs/archive/paedplot_opus_briefing.md`. Full technical explanation in `docs/archive/paedplot_explainer.md`. Line-by-line codebase map in `docs/archive/CODEBASE_REFERENCE.md`. (These three describe the v1.9 architecture and are archived pending a refresh — the current architecture summary lives in `CLAUDE.md`.)
 
@@ -45,7 +46,7 @@ Key design decisions documented in `docs/archive/paedplot_opus_briefing.md`. Ful
 
 | Version | Summary |
 |---|---|
-| v2.4 | Document-viewer layout: fit-width Paper mode, Combined/Weight/Height selector, sticky age axis, results-panel docking (current `src/paedplot.html`) |
+| v2.4 (current) | Document-viewer layout: fit-width Paper mode, Combined/Weight/Height selector, sticky age axis, results-panel docking. July 2026 in-place updates: solid paper-matched gridlines (thick/thin hierarchy), phones always render flush fit-width, 1×/2×/3× phone zoom with sticky kg/cm axis and floating zoom control, tightened axis gutters with inline unit captions |
 | v2.3 | Fit width / Fit page zoom modes; grid proportions recalibrated against the printed RCPCH charts |
 | v2.2 | Viewport-fit chart sizing — whole chart visible in one screenful across screen sizes |
 | v2.1 | Embedded Hind font, new boys/girls palette, table styling; audit fixes (range persistence, preterm toggle visibility, edge-label filtering) |
