@@ -2991,7 +2991,10 @@ function drawCombinedChart(canvasId, range) {
   // Publish x-geometry for the sticky age axis (v2.4). sqX/sqY: pixel size of
   // one paper grid square per axis — must always be equal (see drawSingleChart).
   window._axisGeom = { ageMin, ageMax, mLeft: m.left, mTop: m.top, plotW, plotH, cw: actualCw, s, range,
-    sqX: plotW / xSq, sqY: pxPerCm * STEP_HT };
+    sqX: plotW / xSq, sqY: pxPerCm * STEP_HT,
+    // y-transform params for the sticky centile labels (combined view only):
+    // lets updateStickyYAxis recompute each centile's y at the panned-to age.
+    cy: { yAnchor, HT_ANCHOR, WT_ANCHOR, pxPerCm, pxPerKg, accent: accentColor } };
   canvas._gutterPx = m.left; // left-gutter width for the sticky y-axis copy
 }
 
@@ -3083,34 +3086,89 @@ function updateStickyYAxis() {
   const show = getZoomMode() === 'paper' && panels.length > 0 &&
     stack.scrollWidth > stack.clientWidth + 1;
   wrap.style.display = show ? 'block' : 'none';
-  if (!show) return;
+  if (!show) { window._stickyYDraw = null; return; }
 
   const dpr = window.devicePixelRatio || 1;
+  const g = window._axisGeom;
   const gw = Math.ceil(Math.max(...panels.map(c => c._gutterPx))) + 2; // + the 1px axis line
+  // Extra transparent strip right of the gutter for the sticky centile
+  // labels (combined view only — g.cy published by drawCombinedChart).
+  const labelExt = (g && g.cy) ? Math.round(30 * g.s) : 0;
   const totalH = Math.round(stack.clientHeight);
   wrap.style.top = stack.offsetTop + 'px';
-  canvas.width = Math.round(gw * dpr);
+  canvas.width = Math.round((gw + labelExt) * dpr);
   canvas.height = Math.round(totalH * dpr);
-  canvas.style.width = gw + 'px';
+  canvas.style.width = (gw + labelExt) + 'px';
   canvas.style.height = totalH + 'px';
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Static base: frozen copy of the canvases' left gutters.
+  const base = document.createElement('canvas');
+  base.width = Math.round(gw * dpr);
+  base.height = canvas.height;
+  const bctx = base.getContext('2d');
   const stackTop = stack.getBoundingClientRect().top;
+  let mainDestY = 0; // y-offset of the (first) canvas within the strip, CSS px
   for (const c of panels) {
     const destY = Math.round((c.getBoundingClientRect().top - stackTop) * dpr);
+    if (c === panels[0]) mainDestY = destY / dpr;
     const sw = Math.min(c.width, Math.round(gw * dpr));
-    ctx.drawImage(c, 0, 0, sw, c.height, 0, destY, sw, c.height);
+    bctx.drawImage(c, 0, 0, sw, c.height, 0, destY, sw, c.height);
   }
 
-  // Drop-shadow affordance only while actually panned (at scrollLeft 0 the
-  // copy overlays identical pixels and should be invisible).
+  // Composite = base + live centile labels at the panned-to age. Re-run on
+  // every horizontal scroll so the labels track the diagonal centile lines.
+  const composite = () => {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(base, 0, 0);
+    wrap.classList.toggle('scrolled', stack.scrollLeft > 1);
+    if (!g || !g.cy || stack.scrollLeft < 3) return; // at rest, the real in-chart edge labels are visible
+    const cy = g.cy;
+    const age = g.ageMin + ((stack.scrollLeft + gw - g.mLeft) / g.plotW) * (g.ageMax - g.ageMin);
+    const nearestPt = (cache) => {
+      let best = null, bd = Infinity;
+      for (const [ds, pts] of Object.entries(cache)) {
+        if (g.range === '0-1' && ds === 'uk90_preterm' && !chartState.showPreterm) continue;
+        for (const pt of pts) {
+          if (pt.age < g.ageMin - 0.02 || pt.age > g.ageMax + 0.02) continue;
+          if (g.range === '0-1' && ds === 'who_infant' && pt.age < 2 / 52.18 - 1e-9) continue;
+          const d = Math.abs(pt.age - age);
+          if (d < bd) { bd = d; best = pt; }
+        }
+      }
+      return best;
+    };
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.font = `${fontPx(10, g.s)}px Hind, sans-serif`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    const yTop = mainDestY + g.mTop, yBot = mainDestY + g.mTop + g.plotH;
+    for (const [cache, val2y] of [
+      [chartState.htCentileCache, (v) => cy.yAnchor + (cy.HT_ANCHOR - v) * cy.pxPerCm],
+      [chartState.wtCentileCache, (v) => cy.yAnchor + (cy.WT_ANCHOR - v) * cy.pxPerKg],
+    ]) {
+      const pt = cache && nearestPt(cache);
+      if (!pt) continue;
+      for (let ci = 0; ci < CENTILE_LINES.length; ci++) {
+        const py = mainDestY + val2y(pt.vals[ci]);
+        if (py < yTop || py > yBot) continue;
+        const label = CENTILE_LINES[ci].label.replace(/(th|nd|st|rd)$/, '');
+        ctx.strokeStyle = 'white'; ctx.lineWidth = 3 * g.s;
+        ctx.strokeText(label, gw + 2, py);
+        ctx.fillStyle = cy.accent;
+        ctx.fillText(label, gw + 2, py);
+      }
+    }
+    ctx.restore();
+  };
+  window._stickyYDraw = composite;
   if (!stack._stickyYSyncAttached) {
     stack._stickyYSyncAttached = true;
     stack.addEventListener('scroll', () => {
-      wrap.classList.toggle('scrolled', stack.scrollLeft > 1);
+      if (window._stickyYDraw) window._stickyYDraw();
     }, { passive: true });
   }
-  wrap.classList.toggle('scrolled', stack.scrollLeft > 1);
+  composite();
 }
 
 // Draw both charts
