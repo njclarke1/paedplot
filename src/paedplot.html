@@ -2367,7 +2367,8 @@ function setZoomFactor(z) {
 }
 
 // Reflect chartState.viewMode on the Combined|Weight|Height buttons. Called
-// on init, restore, newPatient and setViewMode.
+// on init, restore, newPatient, setViewMode and setChartRange (the Height
+// button's wording is range-dependent).
 function syncViewButtons() {
   const mode = chartState.viewMode;
   const btnCombined = document.getElementById('btnCombined');
@@ -2375,7 +2376,19 @@ function syncViewButtons() {
   const btnHeight   = document.getElementById('btnHeight');
   if (btnCombined) btnCombined.classList.toggle('active', mode === 'combined');
   if (btnWeight)   btnWeight.classList.toggle('active', mode === 'weight');
-  if (btnHeight)   btnHeight.classList.toggle('active', mode === 'height');
+  if (btnHeight) {
+    btnHeight.classList.toggle('active', mode === 'height');
+    // "Length" on the lying-measure ranges, matching the paper charts'
+    // wording (July 2026) — same rule as statureWatermarks.
+    btnHeight.textContent = isLengthRange(chartState.range) ? 'Length' : 'Height';
+  }
+}
+
+// Ranges whose stature measure is lying length rather than standing height
+// (children are measured lying until age 2). The 1-4y range spans the 2y
+// changeover, so it keeps "Height" in the UI (its chart carries both words).
+function isLengthRange(range) {
+  return range === 'preterm' || range === '0-1';
 }
 
 function setViewMode(mode) {
@@ -3107,7 +3120,7 @@ function renderBothCharts() {
 
   const sexLabel = chartState.sex === 'male' ? 'BOYS' : 'GIRLS';
   const modeSuffix = chartState.viewMode === 'weight' ? ' — Weight'
-    : chartState.viewMode === 'height' ? ' — Height'
+    : chartState.viewMode === 'height' ? (isLengthRange(chartState.range) ? ' — Length' : ' — Height')
     : '';
   const titleEl = document.getElementById('unifiedTitle');
   if (titleEl) titleEl.innerHTML =
@@ -3281,6 +3294,7 @@ function setChartRange(range) {
   const activeId = { 'preterm':'btnPretChart', '0-1':'btn01', '1-4':'btn14', '2-9':'btn29', '9-18':'btn918', '2-18':'btn218' }[range];
   const activeEl = document.getElementById(activeId);
   if (activeEl) activeEl.classList.add('active');
+  syncViewButtons(); // Height button reads "Length" on preterm/0-1y
   // Show preterm toggle only on 0-1y separate view (not on the dedicated
   // preterm chart — everything is preterm there — and not in combined view
   // where it has no effect)
