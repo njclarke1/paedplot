@@ -16,3 +16,6 @@ package-lock.json
 # Temp files
 *.tmp
 *.bak
+
+# RCPCH paper charts (copyright RCPCH - reference only, not for redistribution)
+docs/*.pdf

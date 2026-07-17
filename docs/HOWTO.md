@@ -1,5 +1,8 @@
 # PaedPlot — Editing Guide
 
+> **⚠️ Partially stale** — the mechanisms described here still apply, but specific numbers (e.g. `STEP_HT`/`WT_MAJOR` values) predate the v2.3 paper-calibration pass. Trust the source over the examples; see `../CLAUDE.md` for current values.
+
+
 Practical how-tos for common code changes. For full architecture context see
 `paedplot_explainer.md`; for a line-by-line codebase map see `CODEBASE_REFERENCE.md`;
 for Claude Code–specific instructions see `../CLAUDE.md`.

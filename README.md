@@ -2,6 +2,8 @@
 
 Offline single-file HTML tool for plotting UK-WHO paediatric growth charts. Built for mobile-first clinical use on locked-down NHS computers.
 
+**Live preview:** https://njclarke1.github.io/paedplot/ — no install, runs entirely in your browser. Try the Dev modal (bottom of the sidebar) for one-tap sample patients covering every age range.
+
 Embeds the full UK90/WHO LMS reference dataset (~105KB) with zero external dependencies — works entirely offline from a single `.html` file. Open it in any browser, enter patient data, get centile positions and SDS values immediately.
 
 ## Features
@@ -31,20 +33,21 @@ No server, no internet, no account required.
 
 The calculation engine was formally validated against the live RCPCH Digital Growth Charts API in April 2026. A 12-case targeted suite covering every LMS dataset (uk90_preterm, who_infant, who_child, uk90_child), every dataset boundary (2y lying-to-standing, 4y WHO-to-UK90), gestational correction (30+0, 36+0, 28+0), and extreme centile positions — all 24 SDS measurements agreed with the API to better than ±0.001 SDS, two orders of magnitude tighter than the ±0.05 pass criterion.
 
-Full audit trail in `docs/VALIDATION_RECORD.md`. Validation script in `validation/validate_paedplot.sh`.
+Full audit trail in `docs/VALIDATION_RECORD.md`. Validation script in `validation/validate_paedplot.mjs` (Node ≥18, no dependencies; requires an RCPCH API key in the `RCPCH_API_KEY` environment variable). A June 2026 audit confirmed the calculation engine and LMS data remain byte-identical to the validated build.
 
 ## Architecture
 
 Single HTML file containing embedded CSS, HTML, JavaScript, and LMS reference data. No build step, no bundler, no framework. The JS calculation engine (~200 lines) is cleanly separated from the rendering engine (~500 lines) and UI layer (~800 lines).
 
-Key design decisions documented in `docs/paedplot_opus_briefing.md`. Full technical explanation in `docs/paedplot_explainer.md`. Line-by-line codebase map in `docs/CODEBASE_REFERENCE.md`.
-
-For Claude Code integration, see `CLAUDE.md`.
+Key design decisions documented in `docs/paedplot_opus_briefing.md`. Full technical explanation in `docs/paedplot_explainer.md`. Line-by-line codebase map in `docs/CODEBASE_REFERENCE.md`. (These three describe the v1.9 architecture and are pending a refresh — the current architecture summary lives in `CLAUDE.md`.)
 
 ## Version history
 
 | Version | Summary |
 |---|---|
+| v2.4-dev | Document-viewer layout: fit-width Paper mode, Combined/Weight/Height selector, sticky age axis, results-panel docking (current `src/paedplot.html`) |
+| v2.3 | Fit width / Fit page zoom modes; grid proportions recalibrated against the printed RCPCH charts |
+| v2.2 | Viewport-fit chart sizing — whole chart visible in one screenful across screen sizes |
 | v2.1 | Embedded Hind font, new boys/girls palette, table styling; audit fixes (range persistence, preterm toggle visibility, edge-label filtering) |
 | v2.0-phase2 | Combined view for all ranges, tuned scale ratios, sex-specific anchors, girls 2–8y/8–18y split, dual y-axis labels |
 | v2.0-phase1 | Combined view (2–9y): single canvas, dual y-axes, shared gridlines, zoom removed |
@@ -60,7 +63,7 @@ Version snapshots preserved in `versions/`.
 
 ## Roadmap
 
-**v2.0** — Unified single-canvas chart with dual y-axes (height left, weight right). Eliminates triangular dead space by overlaying both measurement types on one chart. Pinch-to-zoom replacing the current binary zoom toggle. OFC, BMI, and mid-parental height as clinical add-ons. See `CLAUDE.md` for the detailed phased plan.
+The unified single-canvas chart (dual y-axes, height left / weight right) shipped across v2.0–v2.4. Still to come: OFC (head circumference) as a third curve set, BMI, mid-parental height target band, a dedicated print-layout pass, and re-validation against the RCPCH API. See `CLAUDE.md` for the detailed plan.
 
 ## Disclaimer
 
