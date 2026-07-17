@@ -2098,8 +2098,11 @@ function getGridSpec(range) {
     case '9-18': {
       // Minor: every 2 months — gridline only
       // Major: every 1 year — gridline + label ('9y', '10y'...). No 6-month labels.
+      // Starts at 96 (age 8), one year earlier than the boys' ageMin of 9, so the
+      // girls chart (ageMin_F: 8) still gets full gridline coverage for 8-9y —
+      // callers filter by their own ageMin/ageMax, same pattern as the '2-9' case.
       const minorGrid = [], majorGrid = [];
-      for (let m = 108; m <= 216; m++) {
+      for (let m = 96; m <= 216; m++) {
         const age = m / 12;
         const isYear = m % 12 === 0;
         const is2Month = m % 2 === 0;
@@ -2247,6 +2250,16 @@ const COMBINED_CHART_CONFIG = {
   '2-9':  { ageMin: 2,  ageMax: 9,  ageMax_F: 8,  HT_ANCHOR: 100, WT_ANCHOR: 50,  HT_ANCHOR_F: 95,  WT_ANCHOR_F: 45,  STEP_HT: 5, STEP_WT: 5,  drawMinors: true,  WT_MAJOR: 5,
             LEFT_WT_MAX: 20, LEFT_HT_MIN: 75, RIGHT_WT_MAX: 50,   RIGHT_HT_MIN: 105, LABEL_HT_STEP: 5 },
   '9-18': { ageMin: 9,  ageMax: 18, ageMin_F: 8,  HT_ANCHOR: 125, WT_ANCHOR: 100, HT_ANCHOR_F: 125, WT_ANCHOR_F: 90,  STEP_HT: 5, STEP_WT: 5,  drawMinors: true,  WT_MAJOR: 5,
+            // The anchors put weight's data ceiling (100/90kg) on the same row as
+            // height's data floor (125cm) ON PURPOSE — that vertical offset is what
+            // keeps the two centile bands separated (height band above, weight band
+            // below), matching the paper 2-18 layout. Do NOT "optimise" the anchors
+            // to shrink the square count: a July 2026 attempt moved WT_ANCHOR to 30
+            // and fully overlapped the two bands. The tall canvas is the design.
+            // HT_MAX_FIXED / WT_MIN_FIXED pad the axes to the requested paper-style
+            // extents (boys ht→200 wt→10, girls ht→185 wt→10) beyond the tight
+            // centile-data envelope; see the clamp in drawCombinedChart.
+            HT_MAX_FIXED: 200, WT_MIN_FIXED: 10, HT_MAX_FIXED_F: 185, WT_MIN_FIXED_F: 10,
             LEFT_WT_MAX: 80, LEFT_HT_MIN: 110, RIGHT_WT_MAX: 100, RIGHT_HT_MIN: 135,
             LEFT_WT_MAX_F: 70, LEFT_HT_MIN_F: 110, RIGHT_WT_MAX_F: 95, RIGHT_HT_MIN_F: 135, LABEL_HT_STEP: 5 },
 };
@@ -2314,6 +2327,19 @@ function drawCombinedChart(canvasId, range) {
   htMax = Math.ceil(htMax  / STEP_HT) * STEP_HT;
   wtMin = Math.floor(wtMin / STEP_WT) * STEP_WT;
   wtMax = Math.ceil(wtMax  / STEP_WT) * STEP_WT;
+
+  // Fixed paper-chart-style floor/ceiling (optional per range/sex — see e.g.
+  // '9-18'). Guarantees the axis reaches at least this far even when the
+  // centile data alone would snap tighter; an outlier patient measurement can
+  // still push it further out, since this only ever widens the envelope.
+  const htMinFix = (isFemale && cfg.HT_MIN_FIXED_F != null) ? cfg.HT_MIN_FIXED_F : cfg.HT_MIN_FIXED;
+  const htMaxFix = (isFemale && cfg.HT_MAX_FIXED_F != null) ? cfg.HT_MAX_FIXED_F : cfg.HT_MAX_FIXED;
+  const wtMinFix = (isFemale && cfg.WT_MIN_FIXED_F != null) ? cfg.WT_MIN_FIXED_F : cfg.WT_MIN_FIXED;
+  const wtMaxFix = (isFemale && cfg.WT_MAX_FIXED_F != null) ? cfg.WT_MAX_FIXED_F : cfg.WT_MAX_FIXED;
+  if (htMinFix != null) htMin = Math.min(htMin, htMinFix);
+  if (htMaxFix != null) htMax = Math.max(htMax, htMaxFix);
+  if (wtMinFix != null) wtMin = Math.min(wtMin, wtMinFix);
+  if (wtMaxFix != null) wtMax = Math.max(wtMax, wtMaxFix);
 
   // ── GRID SQUARE COUNT ────────────────────────────────────────
   // Height grid squares: STEP_HT cm each. Weight grid squares: WT_MAJOR kg each.
