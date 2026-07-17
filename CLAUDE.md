@@ -8,7 +8,7 @@ PaedPlot is a fully offline, single-file HTML tool for plotting UK-WHO paediatri
 
 ## Current state
 
-**Version:** v2.4 (July 2026) — document-viewer redesign: fit-width Paper mode (was a fixed 720px sheet, now fills the chart column), page-card/sticky-axis styling, and a three-way Combined | Weight | Height selector replacing Combined/Separate. v2.3 introduced the Paper/Fit zoom modes; v2.2 was the viewport-fit sizing overhaul. Footer/print strings updated to v2.4 (July 2026, for the public GitHub Pages preview). Snapshot `versions/paedplot_v2.4.html` re-cut 17 July 2026 after on-device sign-off of the full July feature arc: solid paper-matched gridlines, phone-flush fit-width, 1×/2×/3× phone zoom with sticky y-axis + floating zoom control, tightened gutters with inline unit captions, and the horizontal touch-panning fix.
+**Version:** v2.5 (17 July 2026) — the mobile-zoom release, signed off on-device: solid paper-matched gridlines, phones always flush fit-width, 1×/2×/3× square-preserving phone zoom with sticky y-axis + floating zoom control, tightened gutters with inline unit captions, horizontal touch-panning fix, paper-matched "length"/"height" watermarks and view-button wording. v2.4 was the document-viewer redesign (fit-width Paper mode filling the chart column, Combined | Weight | Height selector); v2.3 introduced the Paper/Fit zoom modes; v2.2 was the viewport-fit sizing overhaul. Snapshots: `versions/paedplot_v2.5.html` (current) and `versions/paedplot_v2.4.html` (cut mid-arc, includes the zoom feature but not the watermark/wording changes).
 **Working file:** `src/paedplot.html` (~306KB, ~3400 lines — includes ~90KB embedded Hind WOFF2 font)
 **Validation status:** SDS calculation engine validated against live RCPCH Digital Growth Charts API to ±0.001 SDS across all datasets, boundaries, and extremes (April 2026). See `docs/VALIDATION_RECORD.md`. June 2026 audit confirmed the engine and LMS data are byte-identical to the validated v1.9 build.
 
@@ -210,7 +210,8 @@ paedplot/
     ├── paedplot_v2.0-design.html
     ├── paedplot_v2.1.html
     ├── paedplot_v2.2.html
-    └── paedplot_v2.4.html
+    ├── paedplot_v2.4.html
+    └── paedplot_v2.5.html
 ```
 
 ## v2.0 roadmap — unified single-canvas chart

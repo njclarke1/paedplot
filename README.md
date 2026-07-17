@@ -46,7 +46,8 @@ Key design decisions documented in `docs/archive/paedplot_opus_briefing.md`. Ful
 
 | Version | Summary |
 |---|---|
-| v2.4 (current) | Document-viewer layout: fit-width Paper mode, Combined/Weight/Height selector, sticky age axis, results-panel docking. July 2026 in-place updates: solid paper-matched gridlines (thick/thin hierarchy), phones always render flush fit-width, 1×/2×/3× phone zoom with sticky kg/cm axis and floating zoom control, tightened axis gutters with inline unit captions |
+| v2.5 (current) | Mobile-zoom release: solid paper-matched gridlines (thick/thin hierarchy), phones always render flush fit-width, 1×/2×/3× square-preserving zoom with sticky kg/cm axis and floating zoom control, tightened axis gutters with inline unit captions, horizontal touch panning, paper-matched "length"/"height" wording on infant ranges |
+| v2.4 | Document-viewer layout: fit-width Paper mode, Combined/Weight/Height selector, sticky age axis, results-panel docking |
 | v2.3 | Fit width / Fit page zoom modes; grid proportions recalibrated against the printed RCPCH charts |
 | v2.2 | Viewport-fit chart sizing — whole chart visible in one screenful across screen sizes |
 | v2.1 | Embedded Hind font, new boys/girls palette, table styling; audit fixes (range persistence, preterm toggle visibility, edge-label filtering) |
