@@ -496,7 +496,7 @@
     .chart-title { font-size: 1.3rem; }
     canvas { width: 100% !important; height: auto !important; }
     .print-header { display: block !important; }
-    .sticky-age-axis { display: none !important; }
+    .sticky-age-axis, .sticky-y-axis, .zoom-fab { display: none !important; }
   }
   .print-header {
     display: none;
@@ -594,11 +594,13 @@
     letter-spacing: 0.08em;
     margin-right: 0.4em;
   }
-  /* #pageCard is an unstyled structural wrapper. (The v2.4 white "sheet"
-     card with shadow/padding was dropped July 2026 — user preferred a
+  /* #pageCard is a visually unstyled structural wrapper. (The v2.4 white
+     "sheet" card with shadow/padding was dropped July 2026 — user preferred a
      minimal border with maximum space for the chart.) It still groups the
      sticky age axis, the chart stack, and the legend, and must NOT become
-     a scroll container or the sticky axis stops engaging. */
+     a scroll container or the sticky axis stops engaging. position:relative
+     only anchors the absolutely-positioned sticky y-axis overlay. */
+  .page-card { position: relative; }
   .charts-stack {
     display: flex;
     flex-direction: column;
@@ -629,6 +631,48 @@
   }
   .sticky-age-clip { overflow: hidden; }
   #stickyAxisCanvas { display: block; margin: 0 auto; }
+
+  /* STICKY Y AXIS (July 2026) — the vertical counterpart of the sticky age
+     axis: a frozen pixel-copy of the canvases' left gutter, absolutely
+     positioned at the stack's left edge OUTSIDE .charts-stack's horizontal
+     scroller, so kg/cm labels stay readable while a zoomed sheet pans
+     sideways. Shown/sized by updateStickyYAxis only when the sheet actually
+     overflows horizontally. pointer-events:none keeps tooltip taps reaching
+     the canvas beneath. */
+  .sticky-y-axis {
+    display: none;
+    position: absolute;
+    left: 0;
+    z-index: 15;
+    pointer-events: none;
+  }
+  .sticky-y-axis.scrolled { box-shadow: 2px 0 5px rgba(0,0,0,0.12); }
+  #stickyYAxisCanvas { display: block; }
+
+  /* FLOATING ZOOM CONTROL (July 2026) — phones only (see syncZoomButtons).
+     Fixed at the thumb corner so 1×/2×/3× stay reachable while deep in a
+     zoomed chart (the inline controls row scrolls away). */
+  .zoom-fab {
+    display: none;
+    position: fixed;
+    right: 12px;
+    bottom: 14px;
+    z-index: 60;
+    gap: 3px;
+    padding: 5px;
+    background: rgba(255,255,255,0.93);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+  }
+  .zoom-fab .ctrl-btn {
+    min-width: 42px;
+    padding: 9px 0;
+    font-size: 0.85rem;
+    text-align: center;
+  }
+  .zoom-fab .ctrl-btn:first-child { border-radius: 6px 0 0 6px; }
+  .zoom-fab .ctrl-btn:last-child  { border-radius: 0 6px 6px 0; }
 
   .chart-block {
     position: relative;
@@ -771,8 +815,14 @@
         </div>
         <div class="ctrl-sep"></div>
         <div class="ctrl-group">
+          <!-- Two-column (desktop): Fit width | Fit page pair.
+               Single-column (phone): 1×/2×/3× zoom trio instead — phones are
+               always fit-width; see syncZoomButtons (July 2026). -->
           <button class="ctrl-btn" id="btnPaper" onclick="setZoomMode('paper')" title="Fill the window width — scroll vertically to pan">Fit width</button>
           <button class="ctrl-btn" id="btnFit"   onclick="setZoomMode('fit')"   title="Shrink the whole chart into one screenful">Fit page</button>
+          <button class="ctrl-btn" id="btnZoom1" onclick="setZoomFactor(1)" style="display:none" title="Fit the chart to the screen width">1×</button>
+          <button class="ctrl-btn" id="btnZoom2" onclick="setZoomFactor(2)" style="display:none" title="Zoom to double size — pan by scrolling">2×</button>
+          <button class="ctrl-btn" id="btnZoom3" onclick="setZoomFactor(3)" style="display:none" title="Zoom to triple size — pan by scrolling">3×</button>
         </div>
       </div>
 
@@ -795,6 +845,11 @@
             <canvas id="wtCanvas"></canvas>
           </div>
         </div>
+        <!-- Sticky y-axis (July 2026): frozen copy of the left gutter, shown
+             only while the sheet overflows horizontally (updateStickyYAxis). -->
+        <div class="sticky-y-axis" id="stickyYAxis">
+          <canvas id="stickyYAxisCanvas"></canvas>
+        </div>
 
         <!-- Legend -->
         <div class="legend-row" id="sharedLegend"></div>
@@ -812,6 +867,15 @@
       <!-- Print footer -->
       <div class="print-footer">
         PaedPlot v2.4 — Growth chart reference aid — Not a medical device — Calculations based on UK–WHO reference data (Cole et al.) — Not for permanent clinical record
+      </div>
+
+      <!-- Floating zoom control (July 2026) — phones only (syncZoomButtons):
+           keeps 1×/2×/3× thumb-reachable while deep in a zoomed chart. Lives
+           inside #chartsContainer so it disappears with the empty state. -->
+      <div class="zoom-fab" id="zoomFab">
+        <button class="ctrl-btn" id="btnZoomFab1" onclick="setZoomFactor(1)">1×</button>
+        <button class="ctrl-btn" id="btnZoomFab2" onclick="setZoomFactor(2)">2×</button>
+        <button class="ctrl-btn" id="btnZoomFab3" onclick="setZoomFactor(3)">3×</button>
       </div>
     </div>
   </div>
@@ -1119,7 +1183,8 @@ let chartState = {
   range: '0-1',        // '0-1' | '1-4' | '2-9' | '9-18' | '2-18'
   showPreterm: false,  // whether to show preterm section on 0-1y chart
   viewMode: 'combined', // 'combined' | 'weight' | 'height' — v2.4 (was 'combined' | 'separate' in v2.0-2.3; 'separate' migrated to 'combined' on load)
-  zoomMode: null,       // 'paper' | 'fit' | null — null = device default (v2.3)
+  zoomMode: null,       // 'paper' | 'fit' | null — null = device default (v2.3). Single-column is ALWAYS effectively 'paper' (July 2026) — see getZoomMode
+  zoomFactor: 1,        // 1 | 2 | 3 — phone zoom (July 2026); applies only when single-column, see getZoomFactor
   htMeasurements: [],
   wtMeasurements: [],
   gestWeeks: 40,
@@ -1133,10 +1198,13 @@ let chartState = {
 // ============================================================
 
 // Shared left/right margins — MUST be identical for both panels so columns align
-const CHART_MARGINS = { top: 20, right: 52, bottom: 42, left: 46 };
+// (left 46→32 July 2026: the rotated cm/kg caption column was replaced by
+// inline captions at the head of each label run, so the gutter only needs the
+// numbers + pad — both scale with s, so 32 clears 3-digit labels at any scale)
+const CHART_MARGINS = { top: 20, right: 52, bottom: 42, left: 32 };
 // Per-panel overrides
-const MARGINS_TOP_PANEL    = { top: 20, right: 52, bottom: 4,  left: 46 }; // no bottom space (x-axis suppressed)
-const MARGINS_BOTTOM_PANEL = { top: 4,  right: 52, bottom: 42, left: 46 }; // no top space (butts flush against height)
+const MARGINS_TOP_PANEL    = { top: 20, right: 52, bottom: 4,  left: 32 }; // no bottom space (x-axis suppressed)
+const MARGINS_BOTTOM_PANEL = { top: 4,  right: 52, bottom: 42, left: 32 }; // no top space (butts flush against height)
 
 // Single-row x-axis labels on all ranges — standard bottom margin.
 // (v1.5.5 used a taller two-row strip on 0-1y; the axis_v1 single row made a
@@ -1174,6 +1242,11 @@ const MAX_PX_PER_SQUARE = 40; // safety cap — the viewport-height fit below is
 const SHEET_MIN_WIDTH = 36 * 12; // 432px — two-column layouts only; below this, .charts-stack horizontal scroll takes over. Single-column (phone) fit-width shrinks to the true column width instead (MIN_PX_PER_SQUARE floor), see fitSquareAndScale.
 const SHEET_MAX_WIDTH = 36 * 30; // 1080px — ultrawide cap (1.5× the old fixed 720px sheet)
 
+// Chrome-scale reference for zoomed views (July 2026): at 2×/3× every range
+// uses the UI scale the 2-9y chart (14 x-squares) converges to at flush width,
+// so zoomed label sizes match across ranges. See fitSquareAndScale.
+const ZOOM_REF_SQUARES = 14;
+
 // Slim right gutter (July 2026): in Fit-width mode on a single-column (phone)
 // layout the right margin narrows from 52 to 30 so the sheet sits flush with
 // the screen edge instead of hanging ~145px past it behind a horizontal
@@ -1205,12 +1278,25 @@ function isSingleColumn() {
 
 // Effective zoom mode (v2.3). 'paper' pins the grid square at A4 scale and lets
 // the page scroll (like sliding a paper chart around a desk); 'fit' shrinks the
-// whole chart into one screenful (v2.2 behaviour). Until the user picks one
-// explicitly, the default tracks the layout: paper on desktop (where fit made
-// squares comically small), fit on phones (where one-screenful works well).
+// whole chart into one screenful (v2.2 behaviour).
+// Single-column (July 2026): ALWAYS 'paper' — on-device testing showed the
+// flush fit-width mode is strictly better on phones, making fit-page redundant
+// there; phones get the 1×/2×/3× zoom factor instead (getZoomFactor). A stored
+// 'fit' choice is ignored while narrow but NOT overwritten, so a desktop
+// user's explicit Fit page choice survives a narrow/widen round trip.
+// Two-column: explicit choice if set, else 'paper'.
 function getZoomMode() {
+  if (isSingleColumn()) return 'paper';
   if (chartState.zoomMode === 'paper' || chartState.zoomMode === 'fit') return chartState.zoomMode;
-  return isSingleColumn() ? 'fit' : 'paper';
+  return 'paper';
+}
+
+// Effective phone-zoom factor (July 2026): 2×/3× re-render the grid at
+// double/triple square size (sharp, square-preserving — one scalar multiplies
+// pxSq) with panning via normal scrolling. Only meaningful on single-column
+// layouts; desktop always renders at 1×.
+function getZoomFactor() {
+  return isSingleColumn() ? (chartState.zoomFactor || 1) : 1;
 }
 
 function getViewportBudget() {
@@ -1291,6 +1377,30 @@ function fitSquareAndScale(xSquares, ySquares, panels) {
       if (s2 === s) break; // converged
       s = s2;
     }
+    // Phone zoom (July 2026): scale the CONVERGED flush square by exactly the
+    // 2×/3× factor (outside the fixed point, so margins can't eat into the
+    // base and dilute the factor) — and scale ONLY the square: magnify the
+    // data, not the chrome. Chrome (fonts/margins/dots) at zoom uses a scale
+    // pinned to the ZOOM_REF_SQUARES fixed point rather than this range's own
+    // flush scale, so every range's zoomed view has identical label sizing —
+    // the flush scale varies with square count (0-1y's 26 squares → small
+    // fonts, 2-9y's 14 → larger), and Nick picked 2-9y's as the reference.
+    // 1× is untouched by construction; 2-9y's zoom is unchanged by the pin.
+    const zf = getZoomFactor();
+    if (zf !== 1) {
+      pxSq = pxSq * zf;
+      let sRef = 1;
+      for (let i = 0; i < 4; i++) {
+        const m0 = scaleMargins(effectiveMargins(panels[0]), sRef);
+        const w = Math.max(MIN_PX_PER_SQUARE * ZOOM_REF_SQUARES,
+          Math.min(SHEET_MAX_WIDTH, availW - m0.left - m0.right));
+        const s2 = getUIScale(w / ZOOM_REF_SQUARES);
+        if (s2 === sRef) break;
+        sRef = s2;
+      }
+      s = sRef;
+      margins = panels.map(p => scaleMargins(effectiveMargins(p), s));
+    }
     return { pxSq, s, margins };
   }
   const availW = getCanvasWidth();
@@ -1365,22 +1475,38 @@ function drawYGutter(ctx, entries, side, geom) {
   }
 }
 
-// Rotated kg/cm unit caption for a dual-axis gutter run (v2.4 polish). Only
-// drawn when the run has enough labels to be self-evidently "this section of
-// the axis" rather than a stray word floating beside a single number.
+// Horizontal kg/cm unit caption for a gutter label run (July 2026 — replaces
+// the v2.4 rotated captions, whose dedicated full-height column forced a wide
+// gutter). Drawn one label-row above the run's topmost label, aligned exactly
+// like the numbers themselves — the paper-chart convention of the unit sitting
+// at the head of its number column. Skipped when the run is too short to
+// anchor it, when it would poke above minY (canvas top, or the plot top when
+// the in-canvas age strip occupies the top margin), or when another gutter
+// entry (the other measurement's run) sits too close.
 //   entries    — the label run this caption belongs to (same shape as drawYGutter)
-//   rotateSign — -1 for the left gutter (text reads bottom-to-top), +1 for the right
-function drawGutterUnitCaption(ctx, entries, label, color, x, rotateSign, s) {
+//   side       — 'left' | 'right'
+//   geom       — the same geometry object handed to drawYGutter
+//   allEntries — every entry in this gutter (both runs) for the clearance check
+//   minY       — smallest allowed caption centre-y (default 6)
+function drawGutterUnitCaption(ctx, entries, label, color, side, geom, s, allEntries, minY) {
   if (entries.length < 3) return;
+  const fPx = fontPx(9, s);
   const pys = entries.map(e => e.py);
-  const midY = (Math.min(...pys) + Math.max(...pys)) / 2;
+  const clear = (y) => (allEntries || []).every(e => entries.includes(e) || Math.abs(e.py - y) >= geom.fontPx);
+  // Preferred: head of the run. Fallback: foot of the run (e.g. the cm run's
+  // topmost label often sits at the canvas top edge, leaving no headroom).
+  let capY = Math.min(...pys) - geom.fontPx - 2;
+  if (capY - fPx / 2 < (minY != null ? minY : 6) || !clear(capY)) {
+    capY = Math.max(...pys) + geom.fontPx + 2;
+    const maxY = ctx.canvas.height / (window.devicePixelRatio || 1) - fPx / 2 - 2;
+    if (capY > maxY || !clear(capY)) return;
+  }
   ctx.save();
   ctx.fillStyle = color;
-  ctx.font = `${fontPx(9, s)}px Hind, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.translate(x, midY);
-  ctx.rotate(rotateSign * Math.PI / 2);
-  ctx.fillText(label, 0, 0);
+  ctx.font = `${fPx}px Hind, sans-serif`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = side === 'left' ? 'right' : 'left';
+  ctx.fillText(label, side === 'left' ? geom.axisX - geom.pad : geom.axisX + geom.pad, capY);
   ctx.restore();
 }
 
@@ -1845,15 +1971,8 @@ function drawSingleChart(canvasId, measurementMethod, color, cw, ch, panelPos, s
     axisX: T.m.left, tickLen: Math.round(3 * s), pad: Math.round(5 * s), fontPx: yLabelFont
   });
 
-  // Y AXIS LABEL
-  ctx.save();
-  ctx.fillStyle = measurementMethod === 'height' ? (chartState.sex === 'female' ? '#c9559d' : '#2081c3') : '#000000';
-  ctx.font = `${fontPx(9, s)}px Hind, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.translate(Math.round(10 * s), T.m.top + T.plotH / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.fillText(measurementMethod === 'height' ? 'cm' : 'kg', 0, 0);
-  ctx.restore();
+  // (No rotated left unit label — removed July 2026 with the gutter
+  // tightening: the in-plot top-right panel unit label above covers it.)
 
   // X AXIS TICKS + LABELS — bottom/solo panels get full labels; a top panel
   // gets a minimal age strip at the top margin instead (below), so at
@@ -1971,6 +2090,7 @@ function drawSingleChart(canvasId, measurementMethod, color, cw, ch, panelPos, s
   window._axisGeom = { ageMin, ageMax, mLeft: T.m.left, mTop: T.m.top, plotW: T.plotW, plotH: T.plotH, cw, s, range: chartState.range,
     sqX: T.plotW / ((ageMax - ageMin) / _grid.xYears),
     sqY: T.plotH / ((valMax - valMin) / getGridUnit(chartState.range, measurementMethod)) };
+  canvas._gutterPx = T.m.left; // left-gutter width for the sticky y-axis copy
 }
 
 // Helper: which dataset is best for a given age (for 50th centile label position)
@@ -2163,15 +2283,27 @@ function getGridSpec(range) {
   }
 }
 
-// Reflect the EFFECTIVE zoom mode (explicit choice or device default) on the
-// Paper|Fit buttons. Called on init, restore, newPatient, resize (the default
-// can flip when the layout crosses the 700px breakpoint) and setZoomMode.
+// Reflect the effective zoom UI. Two-column: Fit width | Fit page pair with
+// the EFFECTIVE mode highlighted. Single-column: the pair is replaced by the
+// 1×/2×/3× zoom trio (phones are always fit-width — July 2026). Called on
+// init, restore, newPatient, resize (the control set flips when the layout
+// crosses the 700px breakpoint), setZoomMode and setZoomFactor.
 function syncZoomButtons() {
+  const single = isSingleColumn();
   const mode = getZoomMode();
+  const zf = getZoomFactor();
   const btnP = document.getElementById('btnPaper');
   const btnF = document.getElementById('btnFit');
-  if (btnP) btnP.classList.toggle('active', mode === 'paper');
-  if (btnF) btnF.classList.toggle('active', mode === 'fit');
+  if (btnP) { btnP.style.display = single ? 'none' : ''; btnP.classList.toggle('active', mode === 'paper'); }
+  if (btnF) { btnF.style.display = single ? 'none' : ''; btnF.classList.toggle('active', mode === 'fit'); }
+  for (const z of [1, 2, 3]) {
+    for (const id of ['btnZoom' + z, 'btnZoomFab' + z]) {
+      const btn = document.getElementById(id);
+      if (btn) { btn.style.display = single ? '' : 'none'; btn.classList.toggle('active', z === zf); }
+    }
+  }
+  const fab = document.getElementById('zoomFab');
+  if (fab) fab.style.display = single ? 'flex' : 'none';
 }
 
 function setZoomMode(mode) {
@@ -2179,6 +2311,33 @@ function setZoomMode(mode) {
   syncZoomButtons();
   renderBothCharts();
   saveState();
+}
+
+// Phone zoom (July 2026). Re-renders at the new square size, keeping the
+// point at the centre of the viewport centred: the scroll positions are
+// recorded as fractions of the canvas dimensions and restored scaled, so the
+// region under inspection doesn't jump when hopping 1× → 2× → 3×.
+function setZoomFactor(z) {
+  const stack = document.getElementById('chartsStack');
+  const card = document.getElementById('pageCard');
+  const oldW = stack ? Math.max(1, stack.scrollWidth) : 1;
+  const oldH = card ? Math.max(1, card.offsetHeight) : 1;
+  const viewCX = stack ? stack.scrollLeft + stack.clientWidth / 2 : 0;
+  const cardTop = card ? card.getBoundingClientRect().top + window.scrollY : 0;
+  const viewCY = window.scrollY + window.innerHeight / 2 - cardTop;
+
+  chartState.zoomFactor = z;
+  syncZoomButtons();
+  renderBothCharts();
+  saveState();
+
+  if (stack && card) {
+    const scaleW = Math.max(1, stack.scrollWidth) / oldW;
+    const scaleH = Math.max(1, card.offsetHeight) / oldH;
+    stack.scrollLeft = viewCX * scaleW - stack.clientWidth / 2;
+    const newCardTop = card.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo(0, Math.max(0, newCardTop + viewCY * scaleH - window.innerHeight / 2));
+  }
 }
 
 // Reflect chartState.viewMode on the Combined|Weight|Height buttons. Called
@@ -2667,6 +2826,11 @@ function drawCombinedChart(canvasId, range) {
   const leftGutter  = { axisX: m.left,         tickLen: Math.round(3 * s), pad: Math.round(5 * s), fontPx: yFontC };
   const rightGutter = { axisX: m.left + plotW, tickLen: Math.round(3 * s), pad: Math.round(5 * s), fontPx: yFontC };
 
+  // Unit captions may not poke above the plot top when the in-canvas age
+  // strip occupies the top margin (fit mode) — they'd collide with the
+  // leftmost age labels. In paper mode the top margin is free.
+  const capMinY = getZoomMode() !== 'paper' ? m.top : 6;
+
   // ── LEFT AXIS ──────────────────────────────────────────────
   ctx.textAlign = 'right';
   if (dualLabels) {
@@ -2685,12 +2849,11 @@ function drawCombinedChart(canvasId, range) {
       if (py < m.top - 1 || py > m.top + plotH + 1) continue;
       leftHtEntries.push({ py, text: Math.round(hv).toString(), color: htLabelColor });
     }
-    drawYGutter(ctx, [...leftWtEntries, ...leftHtEntries], 'left', leftGutter);
-    // Rotated kg/cm unit captions (v2.4) — only where a run has enough
-    // labels to make the caption legible on its own, not floating beside a
-    // single number.
-    drawGutterUnitCaption(ctx, leftWtEntries, 'kg', '#000000', Math.round(10 * s), -1, s);
-    drawGutterUnitCaption(ctx, leftHtEntries, 'cm', htLabelColor, Math.round(10 * s), -1, s);
+    const leftAll = [...leftWtEntries, ...leftHtEntries];
+    drawYGutter(ctx, leftAll, 'left', leftGutter);
+    // Inline kg/cm unit captions at the head of each label run (July 2026)
+    drawGutterUnitCaption(ctx, leftWtEntries, 'kg', '#000000', 'left', leftGutter, s, leftAll, capMinY);
+    drawGutterUnitCaption(ctx, leftHtEntries, 'cm', htLabelColor, 'left', leftGutter, s, leftAll, capMinY);
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
     ctx.font = `${yFontC}px Hind, sans-serif`;
   } else {
@@ -2702,11 +2865,8 @@ function drawCombinedChart(canvasId, range) {
       leftEntries.push({ py, text: Math.round(htVal).toString(), color: '#2081c3' });
     }
     drawYGutter(ctx, leftEntries, 'left', leftGutter);
-    ctx.save();
-    ctx.fillStyle = '#2081c3'; ctx.font = `${fontPx(9, s)}px Hind, sans-serif`; ctx.textAlign = 'center';
-    ctx.translate(Math.round(10 * s), (htY(htMin) + htY(htMax)) / 2); ctx.rotate(-Math.PI / 2);
-    ctx.fillText('cm', 0, 0);
-    ctx.restore();
+    drawGutterUnitCaption(ctx, leftEntries, 'cm', '#2081c3', 'left', leftGutter, s, leftEntries, capMinY);
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
     ctx.font = `${yFontC}px Hind, sans-serif`;
   }
 
@@ -2728,11 +2888,11 @@ function drawCombinedChart(canvasId, range) {
       if (py < m.top - 1 || py > m.top + plotH + 1) continue;
       rightHtEntries.push({ py, text: Math.round(hv).toString(), color: htLabelColor });
     }
-    drawYGutter(ctx, [...rightWtEntries, ...rightHtEntries], 'right', rightGutter);
-    if (!slimRightGutter()) { // narrow gutter has no room for the rotated captions
-      drawGutterUnitCaption(ctx, rightWtEntries, 'kg', '#000000', actualCw - Math.round(10 * s), 1, s);
-      drawGutterUnitCaption(ctx, rightHtEntries, 'cm', htLabelColor, actualCw - Math.round(10 * s), 1, s);
-    }
+    const rightAll = [...rightWtEntries, ...rightHtEntries];
+    drawYGutter(ctx, rightAll, 'right', rightGutter);
+    // Inline captions fit even the slim gutter — same footprint as a label
+    drawGutterUnitCaption(ctx, rightWtEntries, 'kg', '#000000', 'right', rightGutter, s, rightAll, capMinY);
+    drawGutterUnitCaption(ctx, rightHtEntries, 'cm', htLabelColor, 'right', rightGutter, s, rightAll, capMinY);
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     ctx.font = `${yFontC}px Hind, sans-serif`;
   } else {
@@ -2745,13 +2905,7 @@ function drawCombinedChart(canvasId, range) {
       rightEntries.push({ py, text: STEP_WT < 1 ? wtVal.toFixed(1) : Math.round(wtVal).toString(), color: '#000000' });
     }
     drawYGutter(ctx, rightEntries, 'right', rightGutter);
-    if (!slimRightGutter()) {
-      ctx.save();
-      ctx.fillStyle = '#000000'; ctx.font = `${fontPx(9, s)}px Hind, sans-serif`; ctx.textAlign = 'center';
-      ctx.translate(actualCw - Math.round(10 * s), (wtY(wtMin) + wtY(wtMax)) / 2); ctx.rotate(Math.PI / 2);
-      ctx.fillText('kg', 0, 0);
-      ctx.restore();
-    }
+    drawGutterUnitCaption(ctx, rightEntries, 'kg', '#000000', 'right', rightGutter, s, rightEntries, capMinY);
   }
 
   // ── LEFT AXIS LINE + BOTTOM X-AXIS LINE ─────────────────────
@@ -2798,6 +2952,7 @@ function drawCombinedChart(canvasId, range) {
   // one paper grid square per axis — must always be equal (see drawSingleChart).
   window._axisGeom = { ageMin, ageMax, mLeft: m.left, mTop: m.top, plotW, plotH, cw: actualCw, s, range,
     sqX: plotW / xSq, sqY: pxPerCm * STEP_HT };
+  canvas._gutterPx = m.left; // left-gutter width for the sticky y-axis copy
 }
 
 // Sticky top age axis (v2.4) — a frozen pane so the age axis stays visible
@@ -2865,6 +3020,59 @@ function updateStickyAxis() {
   if (stack) canvas.style.transform = `translateX(${-stack.scrollLeft}px)`;
 }
 
+// Sticky left y-axis (July 2026) — the vertical counterpart of the sticky age
+// axis. When the sheet overflows .charts-stack horizontally (phone 2×/3× zoom,
+// or a fit-width sheet wider than a narrow column), a frozen copy of each
+// visible canvas's left-gutter pixels is overlaid at the stack's left edge,
+// OUTSIDE the horizontal scroller, so the kg/cm labels stay readable while
+// panning sideways. Pixel-copy (drawImage) rather than redraw: reproduces
+// labels, ticks, unit captions and the axis line exactly, with no duplicated
+// drawing logic. Vertical position needs no syncing — the overlay lives in
+// normal page flow (absolute within #pageCard) and scrolls with the page.
+function updateStickyYAxis() {
+  const wrap = document.getElementById('stickyYAxis');
+  const canvas = document.getElementById('stickyYAxisCanvas');
+  const stack = document.getElementById('chartsStack');
+  if (!wrap || !canvas || !stack) return;
+
+  const panels = [];
+  for (const id of ['htCanvas', 'wtCanvas']) {
+    const c = document.getElementById(id);
+    if (c && c._gutterPx && c.width > 0 && c.getBoundingClientRect().height > 0) panels.push(c);
+  }
+  const show = getZoomMode() === 'paper' && panels.length > 0 &&
+    stack.scrollWidth > stack.clientWidth + 1;
+  wrap.style.display = show ? 'block' : 'none';
+  if (!show) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const gw = Math.ceil(Math.max(...panels.map(c => c._gutterPx))) + 2; // + the 1px axis line
+  const totalH = Math.round(stack.clientHeight);
+  wrap.style.top = stack.offsetTop + 'px';
+  canvas.width = Math.round(gw * dpr);
+  canvas.height = Math.round(totalH * dpr);
+  canvas.style.width = gw + 'px';
+  canvas.style.height = totalH + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const stackTop = stack.getBoundingClientRect().top;
+  for (const c of panels) {
+    const destY = Math.round((c.getBoundingClientRect().top - stackTop) * dpr);
+    const sw = Math.min(c.width, Math.round(gw * dpr));
+    ctx.drawImage(c, 0, 0, sw, c.height, 0, destY, sw, c.height);
+  }
+
+  // Drop-shadow affordance only while actually panned (at scrollLeft 0 the
+  // copy overlays identical pixels and should be invisible).
+  if (!stack._stickyYSyncAttached) {
+    stack._stickyYSyncAttached = true;
+    stack.addEventListener('scroll', () => {
+      wrap.classList.toggle('scrolled', stack.scrollLeft > 1);
+    }, { passive: true });
+  }
+  wrap.classList.toggle('scrolled', stack.scrollLeft > 1);
+}
+
 // Draw both charts
 function renderBothCharts() {
   if (!chartState.htCentileCache) return;
@@ -2923,6 +3131,7 @@ function renderBothCharts() {
     if (wtBlock) wtBlock.style.display = 'none';
     setupTooltip('htCanvas');
     updateStickyAxis();
+    updateStickyYAxis();
     return;
   }
 
@@ -2948,6 +3157,7 @@ function renderBothCharts() {
     if (wtBlock) wtBlock.style.display = 'none';
     setupTooltip('htCanvas');
     updateStickyAxis();
+    updateStickyYAxis();
     return;
   }
 
@@ -3000,6 +3210,7 @@ function renderBothCharts() {
   setupTooltip('htCanvas');
   setupTooltip('wtCanvas');
   updateStickyAxis();
+  updateStickyYAxis();
 }
 
 // ============================================================
@@ -3444,6 +3655,7 @@ function saveState() {
       chartRange:   chartState.range,
       viewMode:     chartState.viewMode,
       zoomMode:     chartState.zoomMode,
+      zoomFactor:   chartState.zoomFactor,
       showPreterm:  chartState.showPreterm,
       rows
     };
@@ -3466,6 +3678,7 @@ function loadState() {
     if (state.viewMode === 'separate') chartState.viewMode = 'combined';
     else if (['combined', 'weight', 'height'].includes(state.viewMode)) chartState.viewMode = state.viewMode;
     if (state.zoomMode === 'paper' || state.zoomMode === 'fit') chartState.zoomMode = state.zoomMode;
+    if ([1, 2, 3].includes(state.zoomFactor)) chartState.zoomFactor = state.zoomFactor;
     if (state.showPreterm !== undefined) chartState.showPreterm = state.showPreterm;
 
     // Sync range buttons
@@ -3543,6 +3756,7 @@ function newPatient() {
   chartState.range           = "0-1";
   chartState.viewMode        = "combined";
   chartState.zoomMode        = null; // back to device default
+  chartState.zoomFactor      = 1;    // back to flush fit-width
 
   // 2. Clear canvases explicitly
   ["htCanvas", "wtCanvas"].forEach(id => {
