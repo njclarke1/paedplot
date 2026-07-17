@@ -1171,8 +1171,26 @@ const MAX_PX_PER_SQUARE = 40; // safety cap — the viewport-height fit below is
 // exactly the paper-chart trade-off, just sized to the available sheet width
 // instead of a fixed constant (v2.3's PAPER_PLOT_WIDTH, which left dead space
 // on wide columns and didn't grow with the window).
-const SHEET_MIN_WIDTH = 36 * 12; // 432px — below this, .charts-stack horizontal scroll takes over
+const SHEET_MIN_WIDTH = 36 * 12; // 432px — two-column layouts only; below this, .charts-stack horizontal scroll takes over. Single-column (phone) fit-width shrinks to the true column width instead (MIN_PX_PER_SQUARE floor), see fitSquareAndScale.
 const SHEET_MAX_WIDTH = 36 * 30; // 1080px — ultrawide cap (1.5× the old fixed 720px sheet)
+
+// Slim right gutter (July 2026): in Fit-width mode on a single-column (phone)
+// layout the right margin narrows from 52 to 30 so the sheet sits flush with
+// the screen edge instead of hanging ~145px past it behind a horizontal
+// scroll. The right gutter's NUMERIC labels are kept — they are load-bearing
+// in the combined view (the left gutter switches from kg to cm at the
+// LEFT_WT_MAX/LEFT_HT_MIN cutoffs, so mid-range values are labelled on the
+// right ONLY) — but the rotated kg/cm unit captions move left-only (no room).
+const SLIM_RIGHT_MARGIN = 30;
+function slimRightGutter() {
+  return getZoomMode() === 'paper' && isSingleColumn();
+}
+// Effective base (unscaled) margins for the current mode. Every consumer of
+// CHART_MARGINS / MARGINS_TOP_PANEL / MARGINS_BOTTOM_PANEL must go through
+// this so the fitter and the renderers can never disagree on canvas width.
+function effectiveMargins(base) {
+  return slimRightGutter() ? { ...base, right: SLIM_RIGHT_MARGIN } : base;
+}
 
 // ── VIEWPORT-FIT SIZING (v2.2) ───────────────────────────────────────────────
 // Square size is fitted to BOTH container width and viewport height, so the
@@ -1257,10 +1275,16 @@ function fitSquareAndScale(xSquares, ySquares, panels) {
   // pxSq, which depends on the margins).
   if (getZoomMode() === 'paper') {
     const availW = getCanvasWidth();
+    // Single-column (phone): the sheet shrinks to the true column width so it
+    // sits flush with the screen edge — only the per-range legibility floor
+    // binds (when it does, e.g. 1-4y's 36 squares, a little horizontal scroll
+    // remains: same accepted trade-off as fit mode). Two-column keeps the
+    // fixed SHEET_MIN_WIDTH floor.
+    const sheetFloor = isSingleColumn() ? MIN_PX_PER_SQUARE * xSquares : SHEET_MIN_WIDTH;
     let s = 1, pxSq, margins;
     for (let i = 0; i < 4; i++) {
-      margins = panels.map(p => scaleMargins(p, s));
-      const sheetW = Math.max(SHEET_MIN_WIDTH,
+      margins = panels.map(p => scaleMargins(effectiveMargins(p), s));
+      const sheetW = Math.max(sheetFloor,
         Math.min(SHEET_MAX_WIDTH, availW - margins[0].left - margins[0].right));
       pxSq = sheetW / xSquares;
       const s2 = getUIScale(pxSq);
@@ -1279,7 +1303,7 @@ function fitSquareAndScale(xSquares, ySquares, panels) {
   };
   let s = 1, pxSq, margins;
   for (let i = 0; i < 4; i++) {
-    margins = panels.map(p => scaleMargins(p, s));
+    margins = panels.map(p => scaleMargins(effectiveMargins(p), s));
     pxSq = fitWith(margins);
     const s2 = getUIScale(pxSq);
     if (s2 === s) break; // converged: pxSq consistent with margins and s
@@ -1546,9 +1570,9 @@ function drawSingleChart(canvasId, measurementMethod, color, cw, ch, panelPos, s
   // Scaled by the UI scale factor so the label gutter tracks the square size —
   // MUST match the scaling renderBothCharts used when pre-sizing cw/ch
   // (both go through scaleMargins with the same s from fitSquareAndScale).
-  const baseMargins = panelPos === 'top' ? MARGINS_TOP_PANEL
+  const baseMargins = effectiveMargins(panelPos === 'top' ? MARGINS_TOP_PANEL
     : panelPos === 'bottom' ? MARGINS_BOTTOM_PANEL
-    : CHART_MARGINS; // solo panel: room for both the top age strip and the full x-axis
+    : CHART_MARGINS); // solo panel: room for both the top age strip and the full x-axis
   const margins = scaleMargins(baseMargins, s);
   const T = makeTransform(ageMin, ageMax, valMin, valMax, cw, ch, margins);
 
@@ -2705,8 +2729,10 @@ function drawCombinedChart(canvasId, range) {
       rightHtEntries.push({ py, text: Math.round(hv).toString(), color: htLabelColor });
     }
     drawYGutter(ctx, [...rightWtEntries, ...rightHtEntries], 'right', rightGutter);
-    drawGutterUnitCaption(ctx, rightWtEntries, 'kg', '#000000', actualCw - Math.round(10 * s), 1, s);
-    drawGutterUnitCaption(ctx, rightHtEntries, 'cm', htLabelColor, actualCw - Math.round(10 * s), 1, s);
+    if (!slimRightGutter()) { // narrow gutter has no room for the rotated captions
+      drawGutterUnitCaption(ctx, rightWtEntries, 'kg', '#000000', actualCw - Math.round(10 * s), 1, s);
+      drawGutterUnitCaption(ctx, rightHtEntries, 'cm', htLabelColor, actualCw - Math.round(10 * s), 1, s);
+    }
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     ctx.font = `${yFontC}px Hind, sans-serif`;
   } else {
@@ -2719,11 +2745,13 @@ function drawCombinedChart(canvasId, range) {
       rightEntries.push({ py, text: STEP_WT < 1 ? wtVal.toFixed(1) : Math.round(wtVal).toString(), color: '#000000' });
     }
     drawYGutter(ctx, rightEntries, 'right', rightGutter);
-    ctx.save();
-    ctx.fillStyle = '#000000'; ctx.font = `${fontPx(9, s)}px Hind, sans-serif`; ctx.textAlign = 'center';
-    ctx.translate(actualCw - Math.round(10 * s), (wtY(wtMin) + wtY(wtMax)) / 2); ctx.rotate(Math.PI / 2);
-    ctx.fillText('kg', 0, 0);
-    ctx.restore();
+    if (!slimRightGutter()) {
+      ctx.save();
+      ctx.fillStyle = '#000000'; ctx.font = `${fontPx(9, s)}px Hind, sans-serif`; ctx.textAlign = 'center';
+      ctx.translate(actualCw - Math.round(10 * s), (wtY(wtMin) + wtY(wtMax)) / 2); ctx.rotate(Math.PI / 2);
+      ctx.fillText('kg', 0, 0);
+      ctx.restore();
+    }
   }
 
   // ── LEFT AXIS LINE + BOTTOM X-AXIS LINE ─────────────────────
